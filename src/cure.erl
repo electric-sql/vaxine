@@ -154,10 +154,10 @@ obtain_objects(Clock, Properties, Objects, StateOrValue) ->
             case application:get_env(antidote, txn_prot) of
                 {ok, clocksi} ->
                     {ok, TxId} = clocksi_istart_tx(Clock, Properties),
-                    ?LOG_DEBUG("Started reading txn",[]),
+                    ?LOG_DEBUG("Started reading txn", []),
                     case obtain_objects(Objects, TxId, StateOrValue) of
                         {ok, Res} ->
-                            ?LOG_DEBUG("Successfull read",[]),
+                            ?LOG_DEBUG("Successfull read", []),
                             {ok, CommitTime} = commit_transaction(TxId),
                             {ok, Res, CommitTime};
                         {error, Reason} -> {error, Reason}

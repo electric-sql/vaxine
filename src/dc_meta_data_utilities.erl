@@ -126,7 +126,7 @@ get_dc_descriptors() ->
             ?LOG_DEBUG("Could not read shared meta data for external_descriptors"),
             %% return self descriptor only
             {ok, Descriptor} = inter_dc_manager:get_descriptor(),
-            ?LOG_DEBUG("Descriptor ~p",[Descriptor]),
+            ?LOG_DEBUG("Descriptor ~p", [Descriptor]),
             [Descriptor]
     end.
 

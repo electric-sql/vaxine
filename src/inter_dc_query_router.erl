@@ -224,7 +224,7 @@ request_log_entries() ->
     meck:expect(inter_dc_sub_vnode, deliver_log_reader_resp, fun(BinaryRep) ->
         <<_Partition:?PARTITION_BYTE_LENGTH/big-unsigned-integer-unit:8, RestBinary/binary>> = BinaryRep,
         %% check if everything is delivered properly
-        {{_DCID = dcid, _Partition = 0}, _Txns = [1,2,3,4]} = binary_to_term(RestBinary),
+        {{_DCID = dcid, _Partition = 0}, _Txns = [1, 2, 3, 4]} = binary_to_term(RestBinary),
         Self ! finish
                                                              end),
 
@@ -234,7 +234,7 @@ request_log_entries() ->
 %%        LimitedTo = erlang:min(To, From + ?LOG_REQUEST_MAX_ENTRIES), %% Limit number of returned entries
 %%        Entries = inter_dc_query_response:get_entries_internal(Partition, From, LimitedTo),
         %% return list of integers, assume read from log read is correct
-        Entries = [1,2,3,4],
+        Entries = [1, 2, 3, 4],
         BinaryResp = term_to_binary({{dc_utilities:get_my_dc_id(), Partition}, Entries}),
         BinaryPartition = inter_dc_txn:partition_to_bin(Partition),
         FullResponse = <<BinaryPartition/binary, BinaryResp/binary>>,
@@ -266,7 +266,7 @@ request_log_entries_timeout() ->
     meck:expect(inter_dc_sub_vnode, deliver_log_reader_resp, fun(BinaryRep) ->
         <<Partition:?PARTITION_BYTE_LENGTH/big-unsigned-integer-unit:8, RestBinary/binary>> = BinaryRep,
         %% check if everything is delivered properly
-        {{_DCID = dcid, _Partition}, _Txns = [1,2,3,4]} = binary_to_term(RestBinary),
+        {{_DCID = dcid, _Partition}, _Txns = [1, 2, 3, 4]} = binary_to_term(RestBinary),
         Self ! {finish_test, Partition}
                                                              end),
 
@@ -279,7 +279,7 @@ request_log_entries_timeout() ->
                 ok;
             _ ->
                 %% return list of integers, assume read from log read is correct
-                Entries = [1,2,3,4],
+                Entries = [1, 2, 3, 4],
                 BinaryResp = term_to_binary({{dc_utilities:get_my_dc_id(), Partition}, Entries}),
                 BinaryPartition = inter_dc_txn:partition_to_bin(Partition),
                 FullResponse = <<BinaryPartition/binary, BinaryResp/binary>>,
@@ -312,7 +312,7 @@ test_init() ->
     meck:new(dc_utilities),
     meck:new(inter_dc_query_response),
     meck:new(inter_dc_sub_vnode),
-    meck:expect(dc_utilities, get_my_partitions, fun() -> [0,1] end),
+    meck:expect(dc_utilities, get_my_partitions, fun() -> [0, 1] end),
     meck:expect(dc_utilities, get_my_dc_id, fun() -> dcid end),
     meck:expect(inter_dc_query_response, request_permissions, fun(A, B) ->
         %% send directly

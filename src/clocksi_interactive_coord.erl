@@ -770,7 +770,7 @@ perform_update(Op, UpdatedPartitions, Transaction, _Sender, ClientOps) ->
     {Key, Type, Update} = Op,
     Partition = ?LOG_UTIL:get_key_partition(Key),
 
-    ?LOG_DEBUG("Key and Partition ~p", [{Key,Partition}]),
+    ?LOG_DEBUG("Key and Partition ~p", [{Key, Partition}]),
 
     WriteSet = case lists:keyfind(Partition, 1, UpdatedPartitions) of
                    false ->
