@@ -151,12 +151,11 @@ handle_cast({any_request, RequestType, {DCID, Partition}, BinaryRequest, Func}, 
             ReqIdBinary = inter_dc_txn:req_id_to_bin(ReqId),
             FullRequest = <<VersionBinary/binary, ReqIdBinary/binary, RequestType, BinaryRequest/binary>>,
 
-            %% TODO Open more sockets concurrently
-            %%      and dispatch these send/recv requests (e.g. as many sockets as ?INTER_DC_QUERY_CONCURRENCY)
             ?LOG_DEBUG("Send and receive"),
             ok = chumak:send_multipart(Socket, [FullRequest]),
 
-            PID = spawn_link(fun() ->
+            %% TODO timeout/kill this PID after X seconds
+            _PID = spawn_link(fun() ->
                 {ok, [BinaryMsg]} = chumak:recv_multipart(Socket),
 
                 ?LOG_DEBUG("Process and apply function"),
