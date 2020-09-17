@@ -197,7 +197,7 @@ get_router_bind_ip() ->
 
 simple() ->
     {ok, Req} = inter_dc_query_req:start_link(),
-
+    
     {ok, Router} = inter_dc_query_router:start_link(),
 
     LogReaders = inter_dc_query_router:get_address_list(),
@@ -212,6 +212,43 @@ simple() ->
     gen_server:stop(Router),
     ok.
 
+request_log_entries() ->
+    {ok, Req} = inter_dc_query_req:start_link(),
+    {ok, Router} = inter_dc_query_router:start_link(),
+
+    LogReaders = inter_dc_query_router:get_address_list(),
+    DcId = dc_utilities:get_my_dc_id(),
+    inter_dc_query_req:add_dc(DcId, [LogReaders]),
+
+    meck:expect(inter_dc_sub_vnode, deliver_log_reader_resp, fun(BinaryRep) ->
+        <<_Partition:?PARTITION_BYTE_LENGTH/big-unsigned-integer-unit:8, RestBinary/binary>> = BinaryRep,
+        %% check if everything is delivered properly
+        {{_DCID = dcid, _Partition = 0}, _Txns = [1,2,3,4]} = binary_to_term(RestBinary)
+                                                             end),
+
+    %% intercept dispatch of `perform_request` to random gen server and handle call directly
+    meck:expect(inter_dc_query_response, get_entries, fun(BinaryQuery, QueryState) ->
+        {read_log, 0 = Partition, 1, 4} = binary_to_term(BinaryQuery),
+%%        LimitedTo = erlang:min(To, From + ?LOG_REQUEST_MAX_ENTRIES), %% Limit number of returned entries
+%%        Entries = inter_dc_query_response:get_entries_internal(Partition, From, LimitedTo),
+        %% return list of integers, assume read from log read is correct
+        Entries = [1,2,3,4],
+        BinaryResp = term_to_binary({{dc_utilities:get_my_dc_id(), Partition}, Entries}),
+        BinaryPartition = inter_dc_txn:partition_to_bin(Partition),
+        FullResponse = <<BinaryPartition/binary, BinaryResp/binary>>,
+        ok = inter_dc_query_router:send_response(FullResponse, QueryState),
+        ok
+                                                      end),
+
+
+%%    %% read log entries 1-4 from partition 0
+    BinaryRequest = term_to_binary({read_log, 0, 1, 4}),
+    inter_dc_query_req:perform_request(2, {DcId, 0}, BinaryRequest, fun inter_dc_sub_vnode:deliver_log_reader_resp/1),
+
+    gen_server:stop(Req),
+    gen_server:stop(Router),
+    ok.
+
 test_init() ->
     logger:add_handler_filter(default, ?MODULE, {fun(_, _) -> stop end, nostate}),
 
@@ -221,6 +258,7 @@ test_init() ->
 
     meck:new(dc_utilities),
     meck:new(inter_dc_query_response),
+    meck:new(inter_dc_sub_vnode),
     meck:expect(dc_utilities, get_my_partitions, fun() -> [0] end),
     meck:expect(dc_utilities, get_my_dc_id, fun() -> dcid end),
     meck:expect(inter_dc_query_response, request_permissions, fun(A, B) ->
@@ -239,7 +277,8 @@ meck_test_() -> {
     fun test_init/0,
     fun test_cleanup/1,
     [
-        fun simple/0
+        fun simple/0,
+        fun request_log_entries/0
     ]}.
 
 -endif.
