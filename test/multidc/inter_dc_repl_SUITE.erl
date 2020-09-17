@@ -96,7 +96,9 @@ simple_replication_test(Config) ->
     {ok, CommitTime} = antidote_utils:update_counters(Node1, [Key], [1], ignore, static, Bucket, antidote),
 
     antidote_utils:check_read_key(Node1, Key, Type, 3, CommitTime, static, Bucket),
+    ct:log("Local read successful", []),
     antidote_utils:check_read_key(Node2, Key, Type, 3, CommitTime, static, Bucket),
+    ct:log("Remote read successful", []),
     pass.
 
 

@@ -107,7 +107,7 @@ check_read_keys(Node, Keys, Type, Expected, Clock, TxId, Bucket) ->
     check_read(Node, Objects, Expected, Clock, TxId).
 
 check_read(Node, Objects, Expected, Clock, TxId) ->
-    check_read(Node, Objects, Expected, Clock, TxId, cure).
+    check_read(Node, Objects, Expected, Clock, TxId, antidote).
 
 check_read(Node, Objects, Expected, Clock, TxId, ProtocolModule) ->
     case TxId of

@@ -266,7 +266,7 @@ wait_for_stable_snapshot(DCID, MinValue) ->
     false ->
       {ok, SS} = dc_utilities:get_stable_snapshot(),
       Value = vectorclock:get(DCID, SS),
-      case Value > MinValue of
+      case Value >= MinValue of
         true ->
           ?LOG_INFO("Connected to DC ~p", [DCID]),
           ok;

@@ -321,6 +321,7 @@ set_up_clusters_common(Config) ->
                     {ok, Descriptor} = rpc:call(FirstNode, antidote_dc_manager, get_connection_descriptor, []),
                     Descriptor
                                         end, Clusters),
+                ct:pal("Obtained descriptor ~p ", [Descriptors]),
 
                 %% subscribe to descriptors of other dcs
                 ok = rpc:call(MainNode, antidote_dc_manager, subscribe_updates_from, [Descriptors])

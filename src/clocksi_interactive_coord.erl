@@ -39,17 +39,17 @@
 -include("antidote.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--define(DC_META_UTIL, mock_partition).
--define(DC_UTIL, mock_partition).
--define(VECTORCLOCK, mock_partition).
--define(LOG_UTIL, mock_partition).
--define(CLOCKSI_VNODE, mock_partition).
--define(CLOCKSI_DOWNSTREAM, mock_partition).
--define(LOGGING_VNODE, mock_partition).
+% -ifdef(TEST).
+% -include_lib("eunit/include/eunit.hrl").
+% -define(DC_META_UTIL, mock_partition).
+% -define(DC_UTIL, mock_partition).
+% -define(VECTORCLOCK, mock_partition).
+% -define(LOG_UTIL, mock_partition).
+% -define(CLOCKSI_VNODE, mock_partition).
+% -define(CLOCKSI_DOWNSTREAM, mock_partition).
+% -define(LOGGING_VNODE, mock_partition).
 
--else.
+% -else.
 -define(DC_META_UTIL, dc_utilities).
 -define(DC_UTIL, dc_utilities).
 -define(VECTORCLOCK, vectorclock).
@@ -57,7 +57,7 @@
 -define(CLOCKSI_VNODE, clocksi_vnode).
 -define(CLOCKSI_DOWNSTREAM, clocksi_downstream).
 -define(LOGGING_VNODE, logging_vnode).
--endif.
+% -endif.
 
 
 %% API
@@ -589,6 +589,7 @@ execute_command(update_objects, UpdateOps, Sender, State = #state{transaction=Tr
         client_ops = ClientOps0,
         updated_partitions = UpdatedPartitions0
     }) ->
+        ?LOG_DEBUG("Coordinator running ~p", [State]),
         case perform_update(Op, UpdatedPartitions0, Transaction, Sender, ClientOps0) of
             {error, _} = Err ->
                 AccState#state{return_accumulator = Err};
@@ -769,13 +770,15 @@ perform_update(Op, UpdatedPartitions, Transaction, _Sender, ClientOps) ->
     {Key, Type, Update} = Op,
     Partition = ?LOG_UTIL:get_key_partition(Key),
 
+    ?LOG_DEBUG("Key and Partition ~p", [{Key,Partition}]),
+
     WriteSet = case lists:keyfind(Partition, 1, UpdatedPartitions) of
                    false ->
                        [];
                    {Partition, WS} ->
                        WS
                end,
-
+    ?LOG_DEBUG("WriteSet ~p", [WriteSet]),
     %% Execute pre_commit_hook if any
     case antidote_hooks:execute_pre_commit_hook(Key, Type, Update) of
         {error, Reason} ->
@@ -793,7 +796,7 @@ perform_update(Op, UpdatedPartitions, Transaction, _Sender, ClientOps) ->
                 PostHookUpdate,
                 WriteSet
             ),
-
+            ?LOG_DEBUG("Downstream ~p", [GenerateResult]),
             case GenerateResult of
                 {error, Reason} ->
                     {error, Reason};
@@ -957,120 +960,120 @@ execute_post_commit_hooks(Ops) ->
 %%% Unit Tests
 %%%===================================================================
 
--ifdef(TEST).
+% -ifdef(TEST).
 
-main_test_() ->
-    {foreach,
-        fun setup/0,
-        fun cleanup/1,
-        [
-            fun empty_prepare_test/1,
-            fun timeout_test/1,
+% main_test_() ->
+%     {foreach,
+%         fun setup/0,
+%         fun cleanup/1,
+%         [
+%             fun empty_prepare_test/1,
+%             fun timeout_test/1,
 
-            fun update_single_abort_test/1,
-            fun update_single_success_test/1,
-            fun update_multi_abort_test1/1,
-            fun update_multi_abort_test2/1,
-            fun update_multi_success_test/1,
+%             fun update_single_abort_test/1,
+%             fun update_single_success_test/1,
+%             fun update_multi_abort_test1/1,
+%             fun update_multi_abort_test2/1,
+%             fun update_multi_success_test/1,
 
-            fun read_single_fail_test/1,
-            fun read_success_test/1,
+%             fun read_single_fail_test/1,
+%             fun read_success_test/1,
 
-            fun downstream_fail_test/1,
-            fun get_snapshot_time_test/0,
-            fun wait_for_clock_test/0
-        ]}.
+%             fun downstream_fail_test/1,
+%             fun get_snapshot_time_test/0,
+%             fun wait_for_clock_test/0
+%         ]}.
 
-% Setup and Cleanup
-setup() ->
-    {ok, Pid} = clocksi_interactive_coord:start_link(),
-    {ok, _Tx} = gen_statem:call(Pid, {start_tx, ignore, []}),
-    Pid.
+% % Setup and Cleanup
+% setup() ->
+%     {ok, Pid} = clocksi_interactive_coord:start_link(),
+%     {ok, _Tx} = gen_statem:call(Pid, {start_tx, ignore, []}),
+%     Pid.
 
-cleanup(Pid) ->
-    case process_info(Pid) of undefined -> io:format("Already cleaned");
-        _ -> clocksi_interactive_coord:stop(Pid) end.
+% cleanup(Pid) ->
+%     case process_info(Pid) of undefined -> io:format("Already cleaned");
+%         _ -> clocksi_interactive_coord:stop(Pid) end.
 
-empty_prepare_test(Pid) ->
-    fun() ->
-        ?assertMatch({ok, _}, gen_statem:call(Pid, {prepare, empty}, infinity))
-    end.
+% empty_prepare_test(Pid) ->
+%     fun() ->
+%         ?assertMatch({ok, _}, gen_statem:call(Pid, {prepare, empty}, infinity))
+%     end.
 
-timeout_test(Pid) ->
-    fun() ->
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {timeout, nothing, nothing}}, infinity)),
-        ?assertMatch({error, aborted}, gen_statem:call(Pid, {prepare, empty}, infinity))
-    end.
+% timeout_test(Pid) ->
+%     fun() ->
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {timeout, nothing, nothing}}, infinity)),
+%         ?assertMatch({error, aborted}, gen_statem:call(Pid, {prepare, empty}, infinity))
+%     end.
 
-update_single_abort_test(Pid) ->
-    fun() ->
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {fail, nothing, nothing}}, infinity)),
-        ?assertMatch({error, aborted}, gen_statem:call(Pid, {prepare, empty}, infinity))
-    end.
+% update_single_abort_test(Pid) ->
+%     fun() ->
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {fail, nothing, nothing}}, infinity)),
+%         ?assertMatch({error, aborted}, gen_statem:call(Pid, {prepare, empty}, infinity))
+%     end.
 
-update_single_success_test(Pid) ->
-    fun() ->
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {single_commit, nothing, nothing}}, infinity)),
-        ?assertMatch({ok, _}, gen_statem:call(Pid, {prepare, empty}, infinity))
-    end.
+% update_single_success_test(Pid) ->
+%     fun() ->
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {single_commit, nothing, nothing}}, infinity)),
+%         ?assertMatch({ok, _}, gen_statem:call(Pid, {prepare, empty}, infinity))
+%     end.
 
-update_multi_abort_test1(Pid) ->
-    fun() ->
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {fail, nothing, nothing}}, infinity)),
-        ?assertMatch({error, aborted}, gen_statem:call(Pid, {prepare, empty}, infinity))
-    end.
+% update_multi_abort_test1(Pid) ->
+%     fun() ->
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {fail, nothing, nothing}}, infinity)),
+%         ?assertMatch({error, aborted}, gen_statem:call(Pid, {prepare, empty}, infinity))
+%     end.
 
-update_multi_abort_test2(Pid) ->
-    fun() ->
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {fail, nothing, nothing}}, infinity)),
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {fail, nothing, nothing}}, infinity)),
-        ?assertMatch({error, aborted}, gen_statem:call(Pid, {prepare, empty}, infinity))
-    end.
+% update_multi_abort_test2(Pid) ->
+%     fun() ->
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {fail, nothing, nothing}}, infinity)),
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {fail, nothing, nothing}}, infinity)),
+%         ?assertMatch({error, aborted}, gen_statem:call(Pid, {prepare, empty}, infinity))
+%     end.
 
-update_multi_success_test(Pid) ->
-    fun() ->
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
-        ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
-        ?assertMatch({ok, _}, gen_statem:call(Pid, {prepare, empty}, infinity))
-    end.
+% update_multi_success_test(Pid) ->
+%     fun() ->
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
+%         ?assertEqual(ok, gen_statem:call(Pid, {update, {success, nothing, nothing}}, infinity)),
+%         ?assertMatch({ok, _}, gen_statem:call(Pid, {prepare, empty}, infinity))
+%     end.
 
-read_single_fail_test(Pid) ->
-    fun() ->
-        ?assertEqual({error, mock_read_fail},
-            gen_statem:call(Pid, {read, {read_fail, nothing}}, infinity))
-    end.
+% read_single_fail_test(Pid) ->
+%     fun() ->
+%         ?assertEqual({error, mock_read_fail},
+%             gen_statem:call(Pid, {read, {read_fail, nothing}}, infinity))
+%     end.
 
-read_success_test(Pid) ->
-    fun() ->
-        {ok, State} = gen_statem:call(Pid, {read, {counter, antidote_crdt_counter_pn}}, infinity),
-        ?assertEqual({ok, 2},
-            {ok, antidote_crdt_counter_pn:value(State)}),
-        ?assertEqual({ok, [a]},
-            gen_statem:call(Pid, {read, {set, antidote_crdt_set_go}}, infinity)),
-        ?assertEqual({ok, mock_value},
-            gen_statem:call(Pid, {read, {mock_type, mock_partition_fsm}}, infinity)),
-        ?assertMatch({ok, _}, gen_statem:call(Pid, {prepare, empty}, infinity))
-    end.
+% read_success_test(Pid) ->
+%     fun() ->
+%         {ok, State} = gen_statem:call(Pid, {read, {counter, antidote_crdt_counter_pn}}, infinity),
+%         ?assertEqual({ok, 2},
+%             {ok, antidote_crdt_counter_pn:value(State)}),
+%         ?assertEqual({ok, [a]},
+%             gen_statem:call(Pid, {read, {set, antidote_crdt_set_go}}, infinity)),
+%         ?assertEqual({ok, mock_value},
+%             gen_statem:call(Pid, {read, {mock_type, mock_partition_fsm}}, infinity)),
+%         ?assertMatch({ok, _}, gen_statem:call(Pid, {prepare, empty}, infinity))
+%     end.
 
-downstream_fail_test(Pid) ->
-    fun() ->
-        ?assertMatch({error, _},
-            gen_statem:call(Pid, {update, {downstream_fail, nothing, nothing}}, infinity))
-    end.
+% downstream_fail_test(Pid) ->
+%     fun() ->
+%         ?assertMatch({error, _},
+%             gen_statem:call(Pid, {update, {downstream_fail, nothing, nothing}}, infinity))
+%     end.
 
 
-get_snapshot_time_test() ->
-    {ok, SnapshotTime} = get_snapshot_time(),
-    ?assertMatch([{mock_dc, _}], vectorclock:to_list(SnapshotTime)).
+% get_snapshot_time_test() ->
+%     {ok, SnapshotTime} = get_snapshot_time(),
+%     ?assertMatch([{mock_dc, _}], vectorclock:to_list(SnapshotTime)).
 
-wait_for_clock_test() ->
-    {ok, SnapshotTime} = wait_for_clock(vectorclock:from_list([{mock_dc, 10}])),
-    ?assertMatch([{mock_dc, _}], vectorclock:to_list(SnapshotTime)),
-    VecClock = dc_utilities:now_microsec(),
-    {ok, SnapshotTime2} = wait_for_clock(vectorclock:from_list([{mock_dc, VecClock}])),
-    ?assertMatch([{mock_dc, _}], vectorclock:to_list(SnapshotTime2)).
+% wait_for_clock_test() ->
+%     {ok, SnapshotTime} = wait_for_clock(vectorclock:from_list([{mock_dc, 10}])),
+%     ?assertMatch([{mock_dc, _}], vectorclock:to_list(SnapshotTime)),
+%     VecClock = dc_utilities:now_microsec(),
+%     {ok, SnapshotTime2} = wait_for_clock(vectorclock:from_list([{mock_dc, VecClock}])),
+%     ?assertMatch([{mock_dc, _}], vectorclock:to_list(SnapshotTime2)).
 
--endif.
+% -endif.
