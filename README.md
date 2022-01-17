@@ -45,7 +45,6 @@ More information:
 Antidote is the reference platform of the [SyncFree](https://syncfree.lip6.fr/) and the [LightKone](https://www.lightkone.eu/) european projects.
 
 ## Community Guidelines
-
 This repo contains guidelines for participating in the Vaxine community:
 
 * [Code of Conduct](./CODE_OF_CONDUCT.md)
