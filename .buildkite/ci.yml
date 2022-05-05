@@ -1,0 +1,8 @@
+---
+steps:
+  -
+    label: ":test_tube: :scientist:"
+    command: |
+      make test
+    agents:
+      queue: "antidote"
