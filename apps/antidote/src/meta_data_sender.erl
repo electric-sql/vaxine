@@ -42,7 +42,7 @@
 -export([
     start_link/1,
     start/1,
-    put_meta/3,
+    put_meta/4,
     get_node_list/0,
     get_node_and_partition_list/0,
     get_merged_data/2,
@@ -111,9 +111,9 @@ get_name(Name) ->
     list_to_atom(atom_to_list(Name) ++ atom_to_list(?MODULE)).
 
 %% Insert meta data for some partition
--spec put_meta(atom(), partition_id(), term()) -> ok.
-put_meta(Name, Partition, NewData) ->
-    true = antidote_ets_meta_data:insert_meta_data(Name, Partition, NewData),
+-spec put_meta(atom(), dcid() | local_dc, partition_id(), term()) -> ok.
+put_meta(Name, Dcid, Partition, Time) ->
+    true = antidote_ets_meta_data:insert_meta_data(Name, Dcid, Partition, Time),
     ok.
 
 %% Remove meta data for partition
@@ -176,7 +176,14 @@ send_meta_data(
             true ->
                 %% update changed counter for this metadata type
                 %?STATS({metadata_updated, Name}),
-                true = antidote_ets_meta_data:insert_meta_data_sender_merged_data(Name, NewResult),
+                NewResult1 = case maps:get(local_dc, NewResult, undefined) of
+                                 undefined -> NewResult;
+                                 LocalDcValue ->
+                                     maps:put(dc_utilities:get_my_dc_id(), LocalDcValue,
+                                              maps:remove(local_dc, NewResult))
+                             end,
+                true = antidote_ets_meta_data:insert_meta_data_sender_merged_data(Name, NewResult1),
+                ok = meta_data_notif_server:notify(Name, NewResult1),
                 NewResult;
             false ->
                 LastResult
@@ -243,24 +250,18 @@ get_merged_meta_data(Name, CheckNodes) ->
             {NewRemote, NewLocal} =
                 case CheckNodes of
                     true ->
-                        {
-                            update(
-                                Name,
+                        {update(Name,
                                 Remote,
                                 NodeList,
                                 fun meta_data_manager:add_node/3,
                                 fun meta_data_manager:remove_node/2,
-                                undefined
-                            ),
-                            update(
-                                Name,
+                               undefined),
+                         update(Name,
                                 Local,
                                 PartitionList,
-                                fun put_meta/3,
+                                fun (N, P, T) -> put_meta(N, local_dc, P, T) end,
                                 fun remove_partition/2,
-                                Name:default()
-                            )
-                        };
+                                undefined)};
                     false ->
                         {Remote, Local}
                 end,
@@ -445,5 +446,10 @@ get_node_and_partition_list_t() ->
     [{nodes, Nodes}] = ets:lookup(node_table, nodes),
     [{partitions, Partitions}] = ets:lookup(node_table, partitions),
     {Nodes, Partitions, WillChange}.
+
+put_meta(MetaType, Partition, VectorClock) ->
+    [ put_meta(MetaType, Dc, Partition, Val)
+      || {Dc, Val} <- vectorclock:to_list(VectorClock)
+    ].
 
 -endif.

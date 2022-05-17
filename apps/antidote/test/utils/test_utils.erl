@@ -49,6 +49,7 @@
 
 -export([
     start_node/2,
+    init_node/2,
     kill_nodes/1,
     kill_and_restart_nodes/2,
     brutal_kill_nodes/1
@@ -101,55 +102,7 @@ start_node(Name, Config) ->
             %% code path for compiled dependencies
             CodePath = lists:filter(fun filelib:is_dir/1, code:get_path()) ,
             lists:foreach(fun(P) -> rpc:call(Node, code, add_patha, [P]) end, CodePath),
-
-            % load application to allow for configuring the environment before starting
-            ok = rpc:call(Node, application, load, [riak_core]),
-            ok = rpc:call(Node, application, load, [antidote_stats]),
-            ok = rpc:call(Node, application, load, [ranch]),
-            ok = rpc:call(Node, application, load, [antidote]),
-
-            %% get remote working dir of node
-            {ok, NodeWorkingDir} = rpc:call(Node, file, get_cwd, []),
-
-            %% DATA DIRS
-            ok = rpc:call(Node, application, set_env, [antidote, data_dir, filename:join([NodeWorkingDir, Node, "antidote-data"])]),
-            ok = rpc:call(Node, application, set_env, [riak_core, ring_state_dir, filename:join([NodeWorkingDir, Node, "data"])]),
-            ok = rpc:call(Node, application, set_env, [riak_core, platform_data_dir, filename:join([NodeWorkingDir, Node, "data"])]),
-
-
-            %% PORTS
-            Port = web_ports(Name),
-            ok = rpc:call(Node, application, set_env, [antidote, logreader_port, Port]),
-            ok = rpc:call(Node, application, set_env, [antidote, pubsub_port, Port + 1]),
-            ok = rpc:call(Node, application, set_env, [ranch, pb_port, Port + 2]),
-            ok = rpc:call(Node, application, set_env, [riak_core, handoff_port, Port + 3]),
-            ok = rpc:call(Node, application, set_env, [antidote_stats, metrics_port, Port + 4]),
-
-
-            %% LOGGING Configuration
-            %% add additional logging handlers to ensure easy access to remote node logs
-            %% for each logging level
-            LogRoot = filename:join([NodeWorkingDir, Node, "logs"]),
-            %% set the logger configuration
-            ok = rpc:call(Node, application, set_env, [antidote, logger, log_config(LogRoot)]),
-            %% set primary output level, no filter
-            rpc:call(Node, logger, set_primary_config, [level, all]),
-            %% load additional logger handlers at remote node
-            rpc:call(Node, logger, add_handlers, [antidote]),
-
-            %% redirect slave logs to ct_master logs
-            ok = rpc:call(Node, application, set_env, [antidote, ct_master, node()]),
-            ConfLog = #{level => debug, formatter => {logger_formatter, #{single_line => true, max_size => 2048}}, config => #{type => standard_io}},
-            _ = rpc:call(Node, logger, add_handler, [antidote_redirect_ct, ct_redirect_handler, ConfLog]),
-
-
-            %% ANTIDOTE Configuration
-            %% reduce number of actual log files created to 4, reduces start-up time of node
-            ok = rpc:call(Node, application, set_env, [riak_core, ring_creation_size, 4]),
-            ok = rpc:call(Node, application, set_env, [antidote, sync_log, true]),
-
-            {ok, _} = rpc:call(Node, application, ensure_all_started, [antidote]),
-            ct:pal("Node ~p started with ports ~p-~p", [Node, Port, Port + 4]),
+            {ok, _} = init_node(Name, Node),
 
             {connect, Node};
         {error, already_started, Node} ->
@@ -162,6 +115,56 @@ start_node(Name, Config) ->
             start_node(Name, Config)
     end.
 
+init_node(Name, Node) ->
+    % load application to allow for configuring the environment before starting
+    ok = rpc:call(Node, application, load, [riak_core]),
+    ok = rpc:call(Node, application, load, [antidote_stats]),
+    ok = rpc:call(Node, application, load, [ranch]),
+    ok = rpc:call(Node, application, load, [antidote]),
+
+    %% get remote working dir of node
+    {ok, NodeWorkingDir} = rpc:call(Node, file, get_cwd, []),
+
+    %% DATA DIRS
+    ok = rpc:call(Node, application, set_env, [antidote, data_dir, filename:join([NodeWorkingDir, Node, "antidote-data"])]),
+    ok = rpc:call(Node, application, set_env, [riak_core, ring_state_dir, filename:join([NodeWorkingDir, Node, "data"])]),
+    ok = rpc:call(Node, application, set_env, [riak_core, platform_data_dir, filename:join([NodeWorkingDir, Node, "data"])]),
+
+
+    %% PORTS
+    Port = web_ports(Name),
+    ok = rpc:call(Node, application, set_env, [antidote, logreader_port, Port]),
+    ok = rpc:call(Node, application, set_env, [antidote, pubsub_port, Port + 1]),
+    ok = rpc:call(Node, application, set_env, [ranch, pb_port, Port + 2]),
+    ok = rpc:call(Node, application, set_env, [riak_core, handoff_port, Port + 3]),
+    ok = rpc:call(Node, application, set_env, [antidote_stats, metrics_port, Port + 4]),
+
+
+    %% LOGGING Configuration
+    %% add additional logging handlers to ensure easy access to remote node logs
+    %% for each logging level
+    LogRoot = filename:join([NodeWorkingDir, Node, "logs"]),
+    %% set the logger configuration
+    ok = rpc:call(Node, application, set_env, [antidote, logger, log_config(LogRoot)]),
+    %% set primary output level, no filter
+    rpc:call(Node, logger, set_primary_config, [level, all]),
+    %% load additional logger handlers at remote node
+    rpc:call(Node, logger, add_handlers, [antidote]),
+
+    %% redirect slave logs to ct_master logs
+    ok = rpc:call(Node, application, set_env, [antidote, ct_master, node()]),
+    ConfLog = #{level => debug, formatter => {logger_formatter, #{single_line => true, max_size => 2048}}, config => #{type => standard_io}},
+    _ = rpc:call(Node, logger, add_handler, [antidote_redirect_ct, ct_redirect_handler, ConfLog]),
+
+
+    %% ANTIDOTE Configuration
+    %% reduce number of actual log files created to 4, reduces start-up time of node
+    ok = rpc:call(Node, application, set_env, [riak_core, ring_creation_size, 4]),
+    ok = rpc:call(Node, application, set_env, [antidote, sync_log, true]),
+
+    {ok, Apps} = rpc:call(Node, application, ensure_all_started, [antidote]),
+    ct:pal("Node ~p started with ports ~p-~p", [Node, Port, Port + 4]),
+    {ok, Apps}.
 
 %% @doc Forces shutdown of nodes and restarts them again with given configuration
 -spec kill_and_restart_nodes([node()], [tuple()]) -> [node()].
@@ -253,8 +256,6 @@ heal_cluster(ANodes, BNodes) ->
          [{Node1, Node2} || Node1 <- ANodes, Node2 <- BNodes]),
     ok.
 
-
-
 web_ports(dev1) -> 10015;
 web_ports(dev2) -> 10025;
 web_ports(dev3) -> 10035;
@@ -269,52 +270,58 @@ web_ports(dcdev1) -> 10215;
 web_ports(dcdev2) -> 10225;
 web_ports(dcdev3) -> 10235.
 
-
 %% Build clusters for all test suites.
 set_up_clusters_common(Config) ->
     ClusterAndDcConfiguration = [[dev1, dev2], [dev3], [dev4]],
 
-    StartDCs = fun(Nodes) ->
-        %% start each node
-        Cl = pmap(fun(N) ->
-            start_node(N, Config)
-                  end,
-            Nodes),
-        [{Status, Claimant} | OtherNodes] = Cl,
+    StartDCs =
+        fun(Nodes) ->
+                %% start each node
+                Cl = pmap(fun(N) -> start_node(N, Config) end, Nodes),
+                [{Status, Claimant} | OtherNodes] = Cl,
 
-        %% check if node was reused or not
-        case Status of
-            ready -> ok;
-            connect ->
-                ct:pal("Creating a ring for claimant ~p and other nodes ~p", [Claimant, unpack(OtherNodes)]),
-                ok = rpc:call(Claimant, antidote_dc_manager, add_nodes_to_dc, [unpack(Cl)])
+                %% check if node was reused or not
+                case Status of
+                    ready -> ok;
+                    connect ->
+                        ct:pal("Creating a ring for claimant ~p and other nodes ~p",
+                               [Claimant, unpack(OtherNodes)]),
+                        ok = rpc:call(Claimant, antidote_dc_manager,
+                                      add_nodes_to_dc, [unpack(Cl)])
+                end,
+                Cl
         end,
-        Cl
-               end,
 
-    Clusters = pmap(fun(Cluster) ->
-        StartDCs(Cluster)
-                    end, ClusterAndDcConfiguration),
+    Clusters = pmap(fun(Cluster) -> StartDCs(Cluster) end, ClusterAndDcConfiguration),
 
     %% DCs started, but not connected yet
     pmap(fun([{Status, MainNode} | _] = CurrentCluster) ->
         case Status of
             ready -> ok;
             connect ->
-                ct:pal("~p of ~p subscribing to other external DCs", [MainNode, unpack(CurrentCluster)]),
+                ct:pal("~p of ~p subscribing to other external DCs",
+                       [MainNode, unpack(CurrentCluster)]),
 
-                Descriptors = lists:map(fun([{_Status, FirstNode} | _]) ->
-                    {ok, Descriptor} = rpc:call(FirstNode, antidote_dc_manager, get_connection_descriptor, []),
-                    Descriptor
-                                        end, Clusters),
+                Descriptors =
+                    lists:map(
+                      fun([{_Status, FirstNode} | _]) ->
+                              {ok, Descriptor} =
+                                  rpc:call(FirstNode, antidote_dc_manager,
+                                           get_connection_descriptor, []),
+                              Descriptor
+                      end, Clusters),
+
+                ct:pal("descriptors: ~p", [Descriptors]),
 
                 %% subscribe to descriptors of other dcs
-                ok = rpc:call(MainNode, antidote_dc_manager, subscribe_updates_from, [Descriptors])
+                ok = rpc:call(MainNode, antidote_dc_manager,
+                              subscribe_updates_from, [Descriptors])
         end
          end, Clusters),
 
 
-    ct:log("Clusters joined and data centers connected connected: ~p", [ClusterAndDcConfiguration]),
+    ct:log("Clusters joined and data centers connected connected: ~p",
+           [ClusterAndDcConfiguration]),
     [unpack(DC) || DC <- Clusters].
 
 

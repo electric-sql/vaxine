@@ -197,7 +197,7 @@
 -type effect() :: term().
 
 %% DC Id is the riak_core ring cluster name
--type dcid() :: undefined | {term(), term()}.
+-type dcid() :: {term(), term()}.
 -type snapshot_time() :: vectorclock:vectorclock().
 -type clock_time() :: non_neg_integer().
 -type dc_and_commit_time() :: {dcid(), clock_time()}.

@@ -103,6 +103,7 @@ init(_Args) ->
             MaterializerMaster,
             InterDcSup,
             StableMetaData,
+            ?CHILD(meta_data_notif_server, worker, []),
             MetaDataManagerSup,
             MetaDataSenderSup,
             BCounterManager,

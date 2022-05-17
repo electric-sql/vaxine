@@ -265,6 +265,8 @@ handle_command(
     State = #state{partition = Partition, prepared_dict = PreparedDict}
 ) ->
     {ok, Time} = get_min_prep(PreparedDict),
+    meta_data_sender:put_meta(stable_time_functions,
+                              local_dc, Partition, Time),
     dc_utilities:call_local_vnode(Partition, logging_vnode_master, {send_min_prepared, Time}),
     {noreply, State};
 handle_command(
@@ -506,6 +508,11 @@ commit(Transaction, TxCommitTime, Updates, CommittedTx, State) ->
                         ok ->
                             ok = notify_on_commit(LogId, LogRecord),
                             NewPreparedDict = clean_and_notify(TxId, Updates, State),
+                            meta_data_sender:put_meta(stable_time_functions,
+                                                      local_dc, State#state.partition,
+                                                      TxCommitTime
+                                                     ),
+
                             {ok, committed, NewPreparedDict};
                         error ->
                             {error, materializer_failure}
