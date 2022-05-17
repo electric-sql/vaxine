@@ -42,7 +42,7 @@
     create_meta_data_sender_table/1,
     create_remote_meta_data_table/1,
     insert_meta_data_sender_merged_data/2,
-    insert_meta_data/3,
+    insert_meta_data/4,
     delete_meta_data_partition/2,
     get_meta_data_sender_merged_data/2,
     remote_table_ready/1,
@@ -63,7 +63,7 @@
 -spec create_meta_data_table(atom()) -> ets:tab().
 create_meta_data_table(Name) ->
     ets:new(get_table_name(Name, ?META_TABLE_NAME), [
-        set, named_table, public, ?META_TABLE_CONCURRENCY
+        bag, named_table, public, ?META_TABLE_CONCURRENCY
     ]).
 
 -spec create_meta_data_sender_table(atom()) -> ets:tab().
@@ -82,9 +82,9 @@ create_remote_meta_data_table(Name) ->
 insert_meta_data_sender_merged_data(Name, Data) ->
     ets:insert(get_table_name(Name, ?META_DATA_SENDER_TABLE_NAME), {merged_data, Data}).
 
--spec insert_meta_data(atom(), partition_id(), term()) -> true.
-insert_meta_data(Name, Partition, Data) ->
-    ets:insert(get_table_name(Name, ?META_TABLE_NAME), {Partition, Data}).
+-spec insert_meta_data(atom(), dcid() | local_dc, partition_id(), term()) -> true.
+insert_meta_data(Name, DcIdOrLocal, Partition, Data) ->
+    ets:insert(get_table_name(Name, ?META_TABLE_NAME), {Partition, DcIdOrLocal, Data}).
 
 %% Remove meta data for partition
 -spec delete_meta_data_partition(atom(), partition_id()) -> true.
@@ -111,7 +111,14 @@ remote_table_ready(Name) ->
 
 -spec get_meta_data_as_map(atom()) -> map().
 get_meta_data_as_map(Name) ->
-    maps:from_list(ets:tab2list(get_table_name(Name, ?META_TABLE_NAME))).
+      lists:foldl(
+        fun({Partition, _DC, undefined}, Acc) ->
+                maps:update_with(Partition, fun(M) -> M end,
+                                #{}, Acc);
+           ({Partition, DC, Val}, Acc) ->
+                maps:update_with(Partition, fun(Map) -> maps:put(DC, Val, Map) end,
+                                 #{ DC => Val }, Acc)
+        end, #{}, ets:tab2list(get_table_name(Name, ?META_TABLE_NAME))).
 
 -spec get_remote_meta_data_as_map(atom()) -> map().
 get_remote_meta_data_as_map(Name) ->

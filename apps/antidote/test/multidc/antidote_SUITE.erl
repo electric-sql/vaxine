@@ -38,7 +38,8 @@
          end_per_suite/1,
          init_per_testcase/2,
          end_per_testcase/2,
-         all/0
+         all/0, 
+         suite/0
         ]).
 
 %% tests
@@ -78,6 +79,9 @@ all() ->
      random_test,
      meta_data_env_test
     ].
+
+suite() ->
+    [{timetrap, timer:minutes(1)}].
 
 %% Tests that add_nodes_to_dc is idempotent
 %% calling it again on each node of a dc should have no effect

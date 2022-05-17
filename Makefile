@@ -78,16 +78,16 @@ coverage:
 
 singledc:
 ifdef SUITE
-	${REBAR} ct --dir apps/antidote/test/singledc --suite ${SUITE}
+	${REBAR} ct --dir apps/antidote/test/singledc --verbose --suite ${SUITE}
 else
-	${REBAR} ct --dir apps/antidote/test/singledc --cover_export_name=singledc
+	${REBAR} ct --dir apps/antidote/test/singledc --verbose --cover_export_name=singledc
 endif
 
 multidc: 
 ifdef SUITE
-	${REBAR} ct --dir apps/antidote/test/multidc --suite ${SUITE}
+	${REBAR} ct --dir apps/antidote/test/multidc --verbose --suite ${SUITE}
 else
-	${REBAR} ct --dir apps/antidote/test/multidc --cover_export_name=multidc
+	${REBAR} ct --dir apps/antidote/test/multidc --verbose --cover_export_name=multidc
 
 endif
 
