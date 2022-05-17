@@ -56,6 +56,7 @@
     check_registered/1,
     get_scalar_stable_time/0,
     get_stable_snapshot/0,
+    get_stable_snapshot/1,
     check_registered_global/1,
     now_microsec/0,
     now_millisec/0
@@ -246,27 +247,38 @@ check_registered(Name) ->
             ok
     end.
 
-%% @doc get_stable_snapshot: Returns stable snapshot time
-%% in the current DC. stable snapshot time is the snapshot available at
-%% in all partitions
--spec get_stable_snapshot() -> {ok, snapshot_time()}.
+%% @doc Returns stable snapshot time.
+%% Does not include information about local DC.
 get_stable_snapshot() ->
+    get_stable_snapshot([]).
+
+%% @doc Returns stable snapshot time
+%% in the current DC. stable snapshot time is the snapshot available at
+%% in all partitions.
+%% When include_local_dc option is provided local_dc timestamp is also
+%% provided in the resulting snapshot time
+-spec get_stable_snapshot([include_local_dc]) -> {ok, snapshot_time()}.
+get_stable_snapshot(Opts) ->
     case meta_data_sender:get_merged_data(stable_time_functions, vectorclock:new()) of
         undefined ->
             %% The snapshot isn't ready yet, need to wait for startup
             %TODO: Extract into configuration constant
             timer:sleep(10),
-            get_stable_snapshot();
+            get_stable_snapshot(Opts);
         SS ->
+            S1 = case proplists:get_bool(include_local_dc, Opts) of
+                     true -> SS;
+                     false-> maps:remove(dc_utilities:get_my_dc_id(), SS)
+                 end,
             case application:get_env(antidote, txn_prot) of
                 {ok, clocksi} ->
                     %% This is fine if transactions coordinators exists on the ring (i.e. they have access
                     %% to riak core meta-data) otherwise will have to change this
-                    {ok, SS};
+                    {ok, S1};
                 {ok, gr} ->
                     %% For gentlerain use the same format as clocksi
                     %% But, replicate GST to all entries in the dict
-                    StableSnapshot = SS,
+                    StableSnapshot = S1,
                     case vectorclock:size(StableSnapshot) of
                         0 ->
                             {ok, StableSnapshot};

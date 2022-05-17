@@ -36,6 +36,7 @@
 -behaviour(riak_core_vnode).
 -include("antidote.hrl").
 -include("inter_dc_repl.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 %% API
 -export([
@@ -245,9 +246,14 @@ update_clock(State = #state{last_updated = LastUpdated}, DCID, Timestamp) ->
             %% Failure to do so may lead to a deadlock during the connection phase.
             true ->
                 %% Update the stable snapshot NEW way (as in Tyler's weak_meta_data branch)
-                ok = meta_data_sender:put_meta(
-                    stable_time_functions, State#state.partition, NewClock
-                ),
+                lists:foreach(
+                  fun({DC, TM}) ->
+                          %% Information provided by inter_dc_dep_vnode shoul not contain
+                          %% local dc info.
+                          ?assert(DC =/= dc_utilities:get_my_dc_id()),
+                          ok = meta_data_sender:put_meta(stable_time_functions, DC,
+                                                         State#state.partition, TM)
+                  end, vectorclock:to_list(NewClock)),
 
                 Now;
             %% Stable snapshot was recently updated, no need to do so.

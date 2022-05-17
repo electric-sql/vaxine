@@ -40,16 +40,20 @@
 %%      i.e. the most recent snapshot is stored at the head of the list.
 %%      The second element of the tuple stores the size of the list.
 
--type vector_orddict() :: {[{vectorclock(), term()}], non_neg_integer()}.
+-type vector_orddict() :: vector_orddict(term()).
 -type nonempty_vector_orddict() :: {[{vectorclock(), term()}, ...], non_neg_integer()}.
 
--export_type([vector_orddict/0, nonempty_vector_orddict/0]).
+-type vector_orddict(S) :: {[{vectorclock(), S}], non_neg_integer()}.
+
+-export_type([vector_orddict/0, vector_orddict/1,
+              nonempty_vector_orddict/0
+             ]).
 
 -export([
     new/0,
     get_smaller/2,
     get_smaller_from_id/3,
-    insert/3,
+    insert/3, append/3,
     insert_bigger/3,
     sublist/3,
     size/1,
@@ -127,6 +131,30 @@ insert_internal(Vector, Val, [{FirstClock, FirstVal} | Rest], Size, PrevList) ->
             {lists:reverse(PrevList, [{Vector, Val} | [{FirstClock, FirstVal} | Rest]]), Size};
         false ->
             insert_internal(Vector, Val, Rest, Size, [{FirstClock, FirstVal} | PrevList])
+    end.
+
+%% @doc Insert an new entry into the sorted list according to the vectorclock.
+-spec append(vectorclock(), term(), vector_orddict()) -> vector_orddict().
+append(Vector, Val, {List, Size}) ->
+    append_internal(Vector, Val, List, Size, []).
+
+-spec append_internal(vectorclock(), term(), [{vectorclock(), term()}], non_neg_integer(), [
+    {vectorclock(), term()}
+]) -> vector_orddict().
+append_internal(Vector, Val, [], Size, PrevList) ->
+    {lists:reverse([{Vector, [Val]} | PrevList]), Size + 1};
+append_internal(Vector, Val, [{FirstClock, FirstVal} | Rest], Size, PrevList) ->
+    case vectorclock:all_dots(Vector, FirstClock, fun erlang:'>='/2) of
+        true ->
+            case Vector of
+                FirstClock ->
+                    {lists:reverse(PrevList, [{FirstClock, [Val | FirstVal]} | Rest]),
+                     Size + 1};
+                _ ->
+                    {lists:reverse(PrevList, [{Vector, [Val]} | [{FirstClock, FirstVal} | Rest]]), Size + 1}
+            end;
+        false ->
+            append_internal(Vector, Val, Rest, Size, [{FirstClock, FirstVal} | PrevList])
     end.
 
 %% @doc Insert a new entry if it is more recent than all other entries.
@@ -303,34 +331,42 @@ vector_orddict_simple_ordering2_test() ->
                  vector_orddict:first(Q2)).
 
 vv_gen() ->
-    vector(3, range(1, 10)).
+    vector(2, range(1, 10)).
 
-prop_vector_orddict_ordering() ->
+prop_vector_orddict_ordering(Fun) ->
     ?FORALL(VVs0, non_empty(list(vv_gen())),
             begin
                 VVs1 = lists:foldl(
                        fun(VVlist, Acc) ->
-                               VV0 = lists:zip(lists:seq(1, 3), VVlist),
+                               VV0 = lists:zip(lists:seq(1, 2), VVlist),
                                VV1 = vectorclock:from_list(VV0),
-                               vector_orddict:insert(VV1, none, Acc)
+                               Fun(VV1, none, Acc)
                        end, vector_orddict:new(), VVs0),
                 %% Verify that monotonically decreasing value
-                {InitVV, _} = vector_orddict:first(VVs1),
-                _ = lists:foldl(fun({VV, _}, MonIncreaseVV) ->
-                                    case vectorclock:ge(MonIncreaseVV, VV) of
-                                        true -> VV;
-                                        false ->
-                                            case vectorclock:ge(VV, MonIncreaseVV) of
-                                                true -> erlang:error(order_failure);
-                                                false -> MonIncreaseVV
-                                            end
-                                    end
-                                end, InitVV, vector_orddict:to_list(VVs1)),
+                VVlist = [ V || {V, _} <- vector_orddict:to_list(VVs1) ],
+
+                _ = lists:foldl(
+                      fun({_VV, D}, []) when D == none orelse is_list(D) ->
+                              ok;
+                         ({VV, D}, Rest) when D == none orelse is_list(D) ->
+                              false = lists:any(fun(Elem) -> vectorclock:gt(Elem, VV) end, Rest),
+                              case Rest of
+                                  [] -> [];
+                                  _ -> tl(Rest)
+                              end
+                         end, tl(VVlist), vector_orddict:to_list(VVs1)),
                 true
             end).
 
+
 vector_orddict_ordering_test() ->
     ?assertEqual(true, proper:quickcheck(
-                         prop_vector_orddict_ordering(), [1000, {to_file, user}])).
+                         prop_vector_orddict_ordering(fun vector_orddict:append/3),
+                         [1000, {to_file, user}])).
+
+vector_orddict_ordering2_test() ->
+    ?assertEqual(true, proper:quickcheck(
+                         prop_vector_orddict_ordering(fun vector_orddict:insert/3),
+                         [1000, {to_file, user}])).
 
 -endif.

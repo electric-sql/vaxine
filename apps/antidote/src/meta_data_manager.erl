@@ -69,12 +69,12 @@ send_meta_data(Name, DestinationNodeId, NodeId, Data) ->
     ).
 
 %% Remove node from the meta data exchange.
--spec remove_node(atom(), atom()) -> ok.
+-spec remove_node(atom(), node()) -> ok.
 remove_node(Name, NodeId) ->
     gen_server:cast({global, generate_server_name(Name, node())}, {remove_node, NodeId}).
 
 %% Add node to the meta data exchange.
--spec add_node(atom(), atom(), any()) -> ok.
+-spec add_node(atom(), node(), any()) -> ok.
 add_node(Name, NodeId, Initial) ->
     gen_server:cast({global, generate_server_name(Name, node())}, {add_node, NodeId, Initial}).
 
@@ -91,9 +91,11 @@ handle_cast({send_meta_data, NodeId, Data}, State = #state{table = Table}) ->
     true = antidote_ets_meta_data:insert_remote_meta_data(Table, NodeId, Data),
     {noreply, State};
 handle_cast({add_node, NodeId, Initial}, State = #state{table = Table}) ->
+    logger:debug("meta_data_manager:add_node ~p", [{NodeId, Initial}]),
     true = antidote_ets_meta_data:insert_remote_meta_data_new(Table, NodeId, Initial),
     {noreply, State};
 handle_cast({remove_node, NodeId}, State = #state{table = Table}) ->
+    logger:debug("meta_data_manager:remove_node ~p", [NodeId]),
     true = antidote_ets_meta_data:delete_remote_meta_data_node(Table, NodeId),
     {noreply, State};
 handle_cast(_Info, State) ->
