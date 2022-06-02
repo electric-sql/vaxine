@@ -1,19 +1,21 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)"
-      srcset="https://vaxine.io/id/vaxine-logo-dark.png"
-  />
-  <source media="(prefers-color-scheme: light)"
-      srcset="https://vaxine.io/id/vaxine-logo-light.png"
-  />
-  <img alt="Vaxine logo" src="https://vaxine.io/id/vaxine-logo-light.png" />
-</picture>
-
-Welcome to the Vaxine source code repository. Vaxine is a rich-CRDT database system based on AntidoteDB.
-
 ![Erlang CI](https://github.com/vaxine-io/vaxine/workflows/Erlang%20CI/badge.svg)
 [![Coverage Status](https://coveralls.io/repos/github/vaxine-io/vaxine/badge.svg?branch=main)](https://coveralls.io/github/vaxine-io/vaxine?branch=main)
 [![License - MIT](https://img.shields.io/badge/license-MIT-green)](./blob/main/LICENSE.md)
 ![Status - Alpha](https://img.shields.io/badge/status-alpha-red)
+
+<h2>
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+        srcset="https://vaxine.io/id/vaxine-logo-dark.png"
+    />
+    <source media="(prefers-color-scheme: light)"
+        srcset="https://vaxine.io/id/vaxine-logo-light.png"
+    />
+    <img alt="Vaxine logo" src="https://vaxine.io/id/vaxine-logo-light.png" />
+  </picture>
+</h2>
+
+Welcome to the Vaxine source code repository. Vaxine is a rich-CRDT database system based on AntidoteDB.
 
 ## About Vaxine
 
