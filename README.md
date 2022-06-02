@@ -1,5 +1,12 @@
-![Vaxine logo](https://vaxine.io/id/vaxine-logo-dark.png#gh-dark-mode-only)
-![Vaxine logo](https://vaxine.io/id/vaxine-logo-light.png#gh-light-mode-only)
+<picture>
+  <source media="(prefers-color-scheme: dark)"
+      srcset="https://vaxine.io/id/vaxine-logo-dark.png"
+  />
+  <source media="(prefers-color-scheme: light)"
+      srcset="https://vaxine.io/id/vaxine-logo-light.png"
+  />
+  <img alt="Vaxine logo" src="https://vaxine.io/id/vaxine-logo-light.png" />
+</picture>
 
 Welcome to the Vaxine source code repository. Vaxine is a rich-CRDT database system based on AntidoteDB.
 
