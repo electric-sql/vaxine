@@ -1,5 +1,6 @@
 defmodule Vax.AdapterIntegrationTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   defmodule TestRepo do
     use Ecto.Repo, adapter: Vax.Adapter, otp_app: :vax

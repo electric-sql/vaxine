@@ -9,7 +9,7 @@ defmodule Vax.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(Mix.env()),
       package: package(),
-      test_paths: ["test", "integration_test"]
+      test_paths: ["test"]
     ] ++ docs()
   end
 
@@ -24,7 +24,6 @@ defmodule Vax.MixProject do
   defp deps(:publish) do
     [
       {:ecto, "~> 3.7"},
-      #
       {:nimble_pool, "~> 0.2.6"}
     ]
   end
@@ -41,7 +40,7 @@ defmodule Vax.MixProject do
     [
       name: "Vax",
       description: "Data access library for the Vaxine database platform.",
-      source_url: "https://github.com/vaxine-io/vax",
+      source_url: "https://github.com/vaxine-io/vaxine",
       homepage_url: "https://vaxine.io"
     ]
   end
