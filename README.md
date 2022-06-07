@@ -1,86 +1,55 @@
-AntidoteDB
-============
+![Erlang CI](https://github.com/vaxine-io/vaxine/workflows/Erlang%20CI/badge.svg)
+[![Coverage Status](https://coveralls.io/repos/github/vaxine-io/vaxine/badge.svg?branch=main)](https://coveralls.io/github/vaxine-io/vaxine?branch=main)
+[![License - MIT](https://img.shields.io/badge/license-MIT-green)](./blob/main/LICENSE.md)
+![Status - Alpha](https://img.shields.io/badge/status-alpha-red)
 
-![Erlang CI](https://github.com/AntidoteDB/antidote/workflows/Erlang%20CI/badge.svg)
-[![Coverage Status](https://coveralls.io/repos/github/AntidoteDB/antidote/badge.svg?branch=master)](https://coveralls.io/github/AntidoteDB/antidote?branch=master)
+<h2>
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+        srcset="https://vaxine.io/id/vaxine-logo-dark.png"
+    />
+    <source media="(prefers-color-scheme: light)"
+        srcset="https://vaxine.io/id/vaxine-logo-light.png"
+    />
+    <img alt="Vaxine logo" src="https://vaxine.io/id/vaxine-logo-light.png" />
+  </picture>
+</h2>
 
-Welcome to the Antidote repository, the reference platform of the [SyncFree European Project](https://syncfree.lip6.fr/) and the [LightKone European Project](https://www.lightkone.eu/).
+Welcome to the Vaxine source code repository. Vaxine is a rich-CRDT database system based on AntidoteDB.
 
-Description
-===========
+## About Vaxine
 
-AntidoteDB is a highly available geo-replicated key-value database.
-AntidoteDB provides features that help programmers to write correct applications while having the same performance and horizontal scalability as AP/NoSQL databases.
-Furthermore, AntidoteDB operations are based on the principle of synchronization-free execution by using Conflict-free replicated datatypes (*CRDTs*).
+Vaxine is a rich-CRDT database system that extends Antidote with a relational data-model, invariant safety, query support and real-time subscriptions. Applications built on top of Vaxine offer:
 
+* low-latency, active-active geo-distribution
+* transactional causal+ consistency
+* relational data model
+* constraints and referential integrity
+* real-time subscriptions
 
-Features
-=========
+More information:
 
-**CRDTs**
+- [Vaxine website](https://vaxine.io)
+- [Documentation](https://vaxine.io/docs)
+- [Example apps](https://vaxine.io/demos) ([source code](https://github.com/vaxine-io/examples))
 
-High-level replicated data types that are designed to work correctly in the presence of concurrent updates and partial failures.
+## About Antidote
 
-**Highly Available Transactions**
+AntidoteDB is a planet scale, highly available, transactional database. Antidote implements the [Cure protocol](https://ieeexplore.ieee.org/document/7536539/) of transactional causal+ consistency based on [CRDTs](https://crdt.tech).
 
-Traditional ACID transactions were built for single-machine deployments. 
-On the one hand, it is expensive to implement ACID transactions in distributed deployments. 
-On the other hand, highly-available transactions (HAT) provide strong consistency within a data center, 
-but still perform well in geo-replicated deployments.
+More information:
 
-**Geo-replication**
+- [Antidote website](https://www.antidotedb.eu)
+- [Documentation](https://antidotedb.gitbook.io/documentation)
 
-Designed to run on multiple servers in locations distributed world-wide. 
-It provides continuous functioning even when there are failures or network partition.
+Antidote is the reference platform of the [SyncFree](https://syncfree.lip6.fr/) and the [LightKone](https://www.lightkone.eu/) european projects.
 
-
-How to Use
-==========
-
-You will find all information on the [project website](http://antidotedb.eu) or the [usage documentation](https://antidotedb.gitbook.io/documentation/).
-
-Small tutorials on how to use Antidote can be found for [Java](https://github.com/AntidoteDB/antidote-java-tutorial) 
-and [Jupyter Notebook](https://github.com/AntidoteDB/antidote-jupyter-notebook).
-
-Topics:
-
-* [Configuring Features of Antidote](https://antidotedb.gitbook.io/documentation/architecture/configuration)
-* [Benchmarking Antidote](https://github.com/AntidoteDB/Benchmarks)
-* Deploying Antidote
-  * [Natively](https://antidotedb.gitbook.io/documentation/deployment/native)
-  * [Local Docker setup](https://antidotedb.gitbook.io/documentation/deployment/docker)
-  * [Docker compose setups](https://antidotedb.gitbook.io/documentation/deployment/docker-compose-setup)
-  * [Docker Swarm](https://antidotedb.gitbook.io/documentation/deployment/dockerswarm)
-  * [Kubernetes](https://antidotedb.gitbook.io/documentation/deployment/kubernetes)
-* [Monitoring an Antidote instance or data center](https://github.com/AntidoteDB/antidote_stats)
-* [Protocol Buffer API](https://antidotedb.gitbook.io/documentation/api/protocol-buffer-api)
-  * [Erlang Client Repository](https://github.com/AntidoteDB/antidote-erlang-client)
-  * [Java Client Repository](https://github.com/AntidoteDB/antidote-java-client)
-  * [JavaScript Client Repository](https://github.com/AntidoteDB/antidote_ts_client)
-  * [Go Client Repository](https://github.com/AntidoteDB/antidote-go-client)
-  * [Python Client Repository](https://github.com/AntidoteDB/antidote-python-client)
-  * [REST Client Repository](https://github.com/LightKone/antidote-rest-server)
-
-Applications that use AntidoteDB:
-
-* [Calender App](https://github.com/AntidoteDB/calender-app)
-* [Antidote Web Shell](https://github.com/AntidoteDB/antidote-web-shell)
-
-
-Antidote Contributing & Development
-==============
-
-Antidote encourages open-source development.
-If you want to contribute, you can find all necessary information in the [developer documentation](https://antidotedb.gitbook.io/documentation/development/setup)
-To make yourself familiar with AntidoteDB, you can start by looking at [good first issues](https://github.com/AntidoteDB/antidote/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
-
-Vaxine Community Guidelines
-==============
+## Community Guidelines
 
 This repo contains guidelines for participating in the Vaxine community:
 
-* [Code of Conduct](CODE_OF_CONDUCT.md)
-* [Guide to Contributing](CONTRIBUTING.md)
-* [Contributor License Agreement](CLA.md)
+* [Code of Conduct](./CODE_OF_CONDUCT.md)
+* [Guide to Contributing](./CONTRIBUTING.md)
+* [Contributor License Agreement](./CLA.md)
 
 If you have any questions or concerns, please raise them on the [Vaxine community](https://vaxine.io/project/community) channels.
