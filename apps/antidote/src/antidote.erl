@@ -56,6 +56,9 @@
     get_txn_property/2
 ]).
 
+-export_type([snapshot_time/0, dcid/0, clock_time/0,
+             index_node/0]).
+
 %% Public API
 
 -spec start() -> {ok, [atom()]} | {error, reason()}.
