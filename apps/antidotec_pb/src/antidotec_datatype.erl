@@ -64,7 +64,7 @@
 
 %% @doc Returns the module name for the container of the given CRDT data-type.
 -spec module_for_type(set | map | counter | flag | reg) ->
-    antidotec_counter | antidotec_set | antidote_map | antidotec_reg.
+    antidotec_counter | antidotec_set | antidotec_map | antidote_flag | antidotec_reg.
 module_for_type(set) -> antidotec_set;
 module_for_type(map) -> antidotec_map;
 module_for_type(counter)  -> antidotec_counter;
@@ -72,7 +72,7 @@ module_for_type(flag)  -> antidotec_flag;
 module_for_type(reg) -> antidotec_reg.
 
 %% @doc Returns the module name for the CRDT data-type.
--spec module_for_crdt_type(atom()) -> antidotec_counter | antidotec_set | antidote_map | antidotec_reg.
+-spec module_for_crdt_type(atom()) -> antidotec_counter | antidotec_set | antidotec_map | antidotec_flag | antidotec_reg.
 module_for_crdt_type(antidote_crdt_counter_pn) -> antidotec_counter;
 module_for_crdt_type(antidote_crdt_counter_b) -> antidotec_counter;
 module_for_crdt_type(antidote_crdt_counter_fat) -> antidotec_counter;
