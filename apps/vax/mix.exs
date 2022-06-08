@@ -20,13 +20,14 @@ defmodule Vax.MixProject do
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
+  # TODO: need to be fixed for release on hex
   defp deps(:publish) do
     [
       {:ecto, "~> 3.7"},
       {:nimble_pool, "~> 0.2.6"}
     ]
   end
+
   defp deps(_) do
     [
       {:ecto, "~> 3.7"},
