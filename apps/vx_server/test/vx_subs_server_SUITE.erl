@@ -31,6 +31,7 @@ end_per_suite(_, Config) ->
 
 init_per_group(setup_cluster, Config) ->
     init_testsuite(),
+    {ok, _} = application:ensure_all_started(vx_client),
     Nodes = start_dc(3, Config),
     [{nodes, Nodes}, {cookie, erlang:get_cookie()}| Config].
 
@@ -59,7 +60,7 @@ sanity_check(Config) ->
     lists:map(
       fun({N, _Node}) ->
               {ok, Pid} = vx_client:connect("localhost", port(?APP, pb_port, N), []),
-              vx_client:stop(Pid)
+              ok = vx_client:stop(Pid)
       end, Nodes),
     ok.
 

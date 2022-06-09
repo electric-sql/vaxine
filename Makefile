@@ -88,7 +88,10 @@ else
 
 endif
 
-systests: singledc multidc
+systests: singledc multidc test_vx_ct
+
+test_vx_ct:
+	${REBAR} ct --dir apps/vx_server/test --cover_export_name=vx_dc
 
 docs:
 	${REBAR} doc skip_deps=true

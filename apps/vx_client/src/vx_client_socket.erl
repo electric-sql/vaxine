@@ -74,7 +74,7 @@ init([Address, Port, Options]) ->
     end.
 
 handle_call(stop, _From, State) ->
-    {noreply, disconnect_int(State)};
+    {stop, normal, ok, disconnect_int(State)};
 handle_call(_, _, State) ->
     {noreply, State}.
 

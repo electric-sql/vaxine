@@ -3,7 +3,8 @@
 -export([ connect/3,
           disconnect/1,
           subscribe/4,
-          unsubscribe/2
+          unsubscribe/2,
+          stop/1
         ]).
 
 -export_type([sub_id/0]).
@@ -32,3 +33,6 @@ subscribe(Pid, Keys, Snapshot, SnapshotFlag) ->
           ok | {error, term()}.
 unsubscribe(Pid, SubId) ->
     vx_client_socket:unsubscribe(Pid, SubId).
+
+stop(Pid) ->
+    vx_client_socket:stop(Pid).
