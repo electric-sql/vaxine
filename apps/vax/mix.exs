@@ -9,7 +9,8 @@ defmodule Vax.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(Mix.env()),
       package: package(),
-      test_paths: ["test"]
+      test_paths: ["test"],
+      dialyzer: [ignore_warnings: "dialyzer.ignore-warnings"]
     ] ++ docs()
   end
 
@@ -33,7 +34,8 @@ defmodule Vax.MixProject do
       {:ecto, "~> 3.7"},
       {:antidote_pb_codec, path: "../antidote_pb_codec", override: true},
       {:antidotec_pb, path: "../antidotec_pb"},
-      {:nimble_pool, "~> 0.2.6"}
+      {:nimble_pool, "~> 0.2.6"},
+      {:dialyxir, "~> 1.0", only: [:dev], runtime: false}
     ]
   end
 

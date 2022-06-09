@@ -98,6 +98,8 @@ is_type(T) ->
 type() ->
     counter.
 
+-spec to_ops(term(), antidotec_counter()) ->
+          [{term(), increment | decrement, integer()}].
 to_ops(_BoundObject, #counter{increment = 0}) ->
     [];
 to_ops(BoundObject, #counter{increment = Amount}) when Amount < 0 ->

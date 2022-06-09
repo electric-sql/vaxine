@@ -16,6 +16,9 @@ compile: deps
 test:
 	mix test
 
+dialyzer:
+	mix dialyzer
+
 clean:
 	mix clean
 
