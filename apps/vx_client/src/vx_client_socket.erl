@@ -17,7 +17,7 @@
 -record(state, { address :: address(),
                  port :: inet:port_number(),
                  opts :: [ gen_tcp:connect_option()
-                         | inet:inet_backend()
+                        % | inet:inet_backend()
                          ],
                  socket :: gen_tcp:socket() | undefined,
                  connect_timeout = ?CONN_TIMEOUT :: non_neg_integer(),
