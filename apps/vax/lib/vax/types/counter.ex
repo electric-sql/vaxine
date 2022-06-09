@@ -43,7 +43,7 @@ defmodule Vax.Types.Counter do
 
   @impl Vax.Type
   def compute_change(antidotec_counter, new_value) do
-    old_value = :antidotec_counter.value(antidotec_counter) || 0
+    old_value = :antidotec_counter.value(antidotec_counter)
 
     if old_value > new_value do
       :antidotec_counter.decrement(old_value - new_value, antidotec_counter)

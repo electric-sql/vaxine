@@ -30,7 +30,7 @@ defmodule Vax.Adapter.Helpers do
   @spec load_map(
           repo :: atom(),
           schema :: Ecto.Schema.t(),
-          antidote_map :: :antidotec_map.antidotec_map()
+          antidote_map :: :antidotec_map.antidote_map()
         ) :: struct() | nil
   def load_map(repo, schema, map) do
     map

@@ -219,7 +219,7 @@ defmodule Vax.Adapter do
 
   @impl Ecto.Adapter.Storage
   def storage_status(_) do
-    :ok
+    :up
   end
 
   @doc """

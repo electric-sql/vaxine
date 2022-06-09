@@ -96,8 +96,13 @@ docs:
 xref: compile
 	${REBAR} xref skip_deps=true
 
-dialyzer:
+dialyzer: dialyzer-vaxine dialyzer-vax
+
+dialyzer-vaxine:
 	${REBAR} dialyzer
+
+dialyzer-vax:
+	make dialyzer -C apps/vax
 
 docker-build:
 	tmpdir=`mktemp -d` ; \
