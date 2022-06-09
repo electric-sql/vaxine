@@ -9,7 +9,8 @@ defmodule Vax.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(Mix.env()),
       package: package(),
-      test_paths: ["test"]
+      test_paths: ["test"],
+      dialyzer: [ignore_warnings: "dialyzer.ignore-warnings"]
     ] ++ docs()
   end
 

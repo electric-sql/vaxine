@@ -1,0 +1,6 @@
+lib/vax/adapter/helpers.ex:52: The created fun has no local return
+lib/vax/adapter/helpers.ex:57: Function build_update_map/3 has no local return
+lib/vax/adapter/helpers.ex:66: Function update_map_value/5 has no local return
+lib/vax/adapter/helpers.ex:74: The call antidotec_map:add_or_update(_map@1::tuple(),_map_key@1::{binary(),_},_value@1::any()) does not have an opaque term of type antidotec_map:antidote_map() as 1st argument
+lib/vax/adapter/helpers.ex:97: Function to_antidotec_map/2 has no local return
+lib/vax/adapter/helpers.ex:110: The call erlang:element(1,_map@1::antidotec_map:antidote_map()) contains an opaque term as 2nd argument when terms of different types are expected in these position
