@@ -30,15 +30,11 @@ init([]) ->
     {ok, {SupFlags, ChildSpecs}}.
 
 pb_sub_listener() ->
-    NumOfAcceptors = application:get_env(vaxine, pb_pool_size, 100),
-    MaxConnections = application:get_env(vaxine, pb_max_connections, 1024),
-    Port = application:get_env(vaxine, pb_port, 8088),
-
     ranch:child_spec(
       {?MODULE, vx_subs_worker}, ranch_tcp,
-      #{ num_acceptors => NumOfAcceptors,
-         max_connections => MaxConnections,
-         socket_opts => [{port, Port}]
+      #{ num_acceptors => vx_server_app:get_pb_pool_size(),
+         max_connections => vx_server_app:get_pb_max_connections(),
+         socket_opts => [{port, vx_server_app:get_pb_port()}]
        },
       vx_subs_worker, []
      ).

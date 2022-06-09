@@ -62,7 +62,7 @@ terminate(_, _) ->
 
 add_client(Pid, Socket, State = #state{clients = Clients}) ->
     MonRef = erlang:monitor(process, Pid),
-    Clients1 = lists:keystore(Pid, 1, {Socket, MonRef}, Clients),
+    Clients1 = lists:keystore(Pid, 1, Clients, {Socket, MonRef}),
     State#state{clients = Clients1}.
 
 cleanup_client(Pid, State = #state{clients = Clients}) ->

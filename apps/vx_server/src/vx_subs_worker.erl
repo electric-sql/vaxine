@@ -14,7 +14,7 @@
 
 -record(state, { socket :: port(),
                  transport :: module(),
-                 sub_ids :: [vx_subs_server:sub_id()],
+                 sub_ids = [] :: [vx_subs_server:sub_id()],
                  server_mon :: reference()
                }).
 
@@ -68,8 +68,11 @@ terminate(_, _) ->
 
 %%------------------------------------------------------------------------------
 
-handle_request(#vx_sub_subscribe_req{keys = Keys}, #state{sub_ids = SubIds} = State) ->
-    {ok, SubId} = vx_subs_server:subscribe(Keys),
+handle_request(#vx_sub_subscribe_req{keys = Keys,
+                                     snapshot = Snapshot,
+                                     stable_snapshot = _StableFlag
+                                    }, #state{sub_ids = SubIds} = State) ->
+    {ok, SubId} = vx_subs_server:subscribe(Keys, Snapshot),
     {noreply, State#state{sub_ids = [SubId | SubIds]}};
 handle_request(#vx_sub_unsubscribe_req{sub_id = SubId}, #state{sub_ids = SubIds} = State) ->
     ok = vx_subs_server:unsubscribe(SubId),

@@ -6,6 +6,7 @@
          snapshot :: antidote:snapshot_time(),
          stable_snapshot = false
         }).
+
 -record(vx_sub_unsubscribe_req,
         { sub_id :: reference() }).
 

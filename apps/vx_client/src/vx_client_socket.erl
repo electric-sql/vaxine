@@ -1,7 +1,9 @@
 -module(vx_client_socket).
 -behaviour(gen_server).
 
--export([start_link/2, start_link/3, stop/1]).
+-export([start_link/2, start_link/3,
+         disconnect/1, subscribe/4, unsubscribe/2,
+         stop/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2]).
@@ -10,6 +12,7 @@
 -define(RECONN_INTERVAL, 1000).
 
 -type address() :: inet:socket_address() | inet:hostname().
+-type sub_id() :: vx_client:sub_id().
 
 -record(state, { address :: address(),
                  port :: inet:port_number(),
@@ -31,6 +34,20 @@ start_link(Address, Port) ->
           {ok, pid()} | {error, term()}.
 start_link(Address, Port, Options) when is_list(Options) ->
     gen_server:start_link(?MODULE, [Address, Port, Options], []).
+
+-spec disconnect(pid()) -> ok | {error, term()}.
+disconnect(_Pid) ->
+    %%gen_server:call(Pid, disconnect, infinity).
+    {error, not_implemented}.
+
+-spec subscribe(pid(), [binary()], term(), boolean()) ->
+          {ok, sub_id()} | {error, term()}.
+subscribe(_Pid, _Keys, _Snapshot, _SnapshotFlag) ->
+    {error, not_implemented}.
+
+-spec unsubscribe(pid(), sub_id()) -> ok | {error, term()}.
+unsubscribe(_Pid, _SubId) ->
+    {error, not_implemented}.
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
