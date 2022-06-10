@@ -1,1 +1,8 @@
-[].
+{"1.2.0",
+[{<<"backoff">>,{pkg,<<"backoff">>,<<"1.1.6">>},0}]}.
+[
+{pkg_hash,[
+ {<<"backoff">>, <<"83B72ED2108BA1EE8F7D1C22E0B4A00CFE3593A67DBC792799E8CCE9F42F796B">>}]},
+{pkg_hash_ext,[
+ {<<"backoff">>, <<"CF0CFFF8995FB20562F822E5CC47D8CCF664C5ECDC26A684CBE85C225F9D7C39">>}]}
+].
