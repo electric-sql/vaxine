@@ -96,21 +96,16 @@ defmodule Vax.Adapter do
 
   @impl Ecto.Adapter
   def init(config) do
-    hostname = Keyword.fetch!(config, :hostname) |> String.to_charlist()
-    port = Keyword.get(config, :port, 8087)
-    pool_size = Keyword.get(config, :pool_size, 10)
     log? = Keyword.get(config, :log, true)
-
-    child_spec = %{
-      id: ConnectionPool,
-      start:
-        {NimblePool, :start_link,
-         [[worker: {ConnectionPool, [hostname: hostname, port: port]}, size: pool_size]]}
-    }
-
     if log?, do: Vax.Adapter.Logger.attach()
 
-    {:ok, child_spec, %{}}
+    opts =
+      config
+      |> Keyword.update!(:hostname, &String.to_charlist/1)
+      |> Keyword.put_new(:port, 8087)
+      |> Keyword.put_new(:pool_size, 10)
+
+    {:ok, ConnectionPool.child_spec(opts), %{}}
   end
 
   @impl Ecto.Adapter
@@ -119,10 +114,12 @@ defmodule Vax.Adapter do
   end
 
   @impl Ecto.Adapter
-  def checkout(%{pid: pool}, _config, function) do
+  def checkout(%{repo: repo}, _config, function) do
     if Process.get(:vax_checked_out_conn) do
       function.()
     else
+      pool = ConnectionPool.pool_name(repo)
+
       ConnectionPool.checkout(pool, fn {_pid, _ref}, pid ->
         try do
           Process.put(:vax_checked_out_conn, pid)
