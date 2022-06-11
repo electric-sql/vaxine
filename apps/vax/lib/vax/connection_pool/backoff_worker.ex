@@ -19,16 +19,16 @@ defmodule Vax.ConnectionPool.BackoffWorker do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @spec wait_for_backoff(pid() | atom()) :: :ok
-  def wait_for_backoff(pid_or_name) do
-    pid_or_name
+  @spec wait_for_backoff(GenServer.server()) :: :ok
+  def wait_for_backoff(server) do
+    server
     |> GenServer.call(:reconnection_backoff)
     |> :timer.sleep()
   end
 
-  @spec wait_for_backoff(pid() | atom()) :: :ok
-  def register_failure(pid_or_name) do
-    GenServer.cast(pid_or_name, :register_failure)
+  @spec register_failure(GenServer.server()) :: :ok
+  def register_failure(server) do
+    GenServer.cast(server, :register_failure)
   end
 
   @impl GenServer
