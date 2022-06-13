@@ -13,7 +13,8 @@ RUN apt-get update -y && apt-get install -y build-essential git curl \
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 RUN mix local.hex --force                                                                                                                                                
-RUN mix local.rebar --force  
+RUN mix local.rebar --force
+ENV PATH="/root/.mix/:${PATH}"
 
 WORKDIR /app
 
@@ -22,14 +23,13 @@ ENV CI=true
 COPY rebar.config /app/
 COPY rebar.lock /app/
 
-RUN /root/.mix/rebar3 compile
+RUN rebar3 compile
 
 COPY Makefile /app/
 COPY config/ /app/config/
 COPY apps/ /app/apps/
 
-RUN /root/.mix/rebar3 compile
-RUN /root/.mix/rebar3 release
+RUN make rel
 
 FROM ${RUNNER_IMAGE} AS runner_setup
 
