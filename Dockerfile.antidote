@@ -1,0 +1,113 @@
+ARG ELIXIR_VERSION=1.13.4
+ARG OTP_VERSION=24.3
+ARG DEBIAN_VERSION=bullseye-20210902-slim
+
+ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
+ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+
+FROM ${BUILDER_IMAGE} AS builder
+
+LABEL maintainer="dev@vaxine.io"
+
+RUN apt-get update -y && apt-get install -y build-essential git curl \
+    && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+RUN mix local.hex --force                                                                                                                                                
+RUN mix local.rebar --force  
+
+WORKDIR /app
+
+ENV CI=true
+
+COPY rebar.config /app/
+COPY rebar.lock /app/
+
+RUN /root/.mix/rebar3 compile
+
+COPY Makefile /app/
+COPY config/ /app/config/
+COPY apps/ /app/apps/
+
+RUN /root/.mix/rebar3 compile
+RUN /root/.mix/rebar3 release
+
+FROM ${RUNNER_IMAGE} AS runner_setup
+
+RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses5 locales \
+  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# Set the locale
+RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US:en
+ENV LC_ALL en_US.UTF-8
+
+WORKDIR "/app"
+RUN chown nobody /app
+
+# set runner ENV
+ENV MIX_ENV="prod"
+
+
+FROM runner_setup AS runner
+
+## Antidote configuration via environment variables
+COPY --from=builder --chown=nobody:root /app/_build/default/rel/antidote ./
+
+### Data storage
+# where the logs and data are stored and exposed
+ENV ROOT_DIR_PREFIX="/antidote-data/" \
+    DATA_DIR_PREFIX="data/" \
+    LOGGER_DIR_PREFIX="log/" 
+RUN mkdir -p ${ROOT_DIR_PREFIX}
+RUN chown nobody ${ROOT_DIR_PREFIX}
+
+ENV \
+    ### Riak
+    HANDOFF_PORT="8099" \
+    RING_SIZE="16" \
+    ### Inter-DC communication
+    LOGREADER_PORT="8085" \
+    PBSUB_PORT="8086" \
+    ### Erlang
+    NODE_NAME="antidote@antidote" \
+    COOKIE="secret"\
+    ### Logger verbosity: debug, info, notice, warning, error, alert, critical
+    DEBUG_LOGGER_LEVEL="info"
+    
+
+### Public client
+ENV PB_PORT "8087"
+EXPOSE ${PB_PORT}
+
+## Antidote Features Configuration
+##   Adjusting features for a node restart can have unexpected consequences
+##   Decide on features before first starting and operating the AntidoteDB node
+##   see config/sys.config.src for documentation
+ENV ANTIDOTE_TXN_CERT="true" \
+    ANTIDOTE_TXN_PROT="clocksi" \
+    ANTIDOTE_RECOVER_FROM_LOG="true" \
+    ANTIDOTE_META_DATA_ON_START="true" \
+    ANTIDOTE_SYNC_LOG="false" \
+    ANTIDOTE_ENABLE_LOGGING="true" \
+    ANTIDOTE_AUTO_START_READ_SERVERS="true"
+
+USER nobody
+ENTRYPOINT /app/bin/antidote foreground \
+    -riak_core handoff_port ${HANDOFF_PORT} \
+    -riak_core ring_creation_size ${RING_SIZE} \
+    -antidote txn_cert ${ANTIDOTE_TXN_CERT} \
+    -antidote txn_prot ${ANTIDOTE_TXN_PROT} \
+    -antidote recover_from_log ${ANTIDOTE_RECOVER_FROM_LOG} \
+    -antidote recover_metadata_on_start ${ANTIDOTE_RECOVER_METADATA_ON_START} \
+    -antidote sync_log ${ANTIDOTE_SYNC_LOG} \
+    -antidote enable_logging ${ANTIDOTE_ENABLE_LOGGING} \
+    -antidote auto_start_read_servers ${ANTIDOTE_AUTO_START_READ_SERVERS} \
+    -antidote logreader_port ${LOGREADER_PORT} \
+    -antidote pubsub_port ${PBSUB_PORT} \
+    -ranch pb_port ${PB_PORT} \
+    -antidote_stats metrics_port ${METRICS_PORT} \
+    -kernel logger_level ${DEBUG_LOGGER_LEVEL} \
+    -kernel inet_dist_listen_min ${ERLANG_DIST_PORT_MIN} \
+    -kernel inet_dist_listen_max ${ERLANG_DIST_PORT_MAX}
