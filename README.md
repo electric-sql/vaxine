@@ -1,4 +1,4 @@
-![Erlang CI](https://github.com/vaxine-io/vaxine/workflows/Erlang%20CI/badge.svg)
+![Erlang CI](https://github.com/vaxine-io/vaxine/workflows/CI/badge.svg)
 [![Coverage Status](https://coveralls.io/repos/github/vaxine-io/vaxine/badge.svg?branch=main)](https://coveralls.io/github/vaxine-io/vaxine?branch=main)
 [![License - MIT](https://img.shields.io/badge/license-MIT-green)](./blob/main/LICENSE.md)
 ![Status - Alpha](https://img.shields.io/badge/status-alpha-red)
