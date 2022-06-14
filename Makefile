@@ -105,9 +105,7 @@ dialyzer-vax:
 	make dialyzer -C apps/vax
 
 docker-build:
-	tmpdir=`mktemp -d` ; \
-	wget "https://raw.githubusercontent.com/AntidoteDB/docker-antidote/master/local-build/Dockerfile" -O "$$tmpdir/Dockerfile" ; \
-	docker build -f $$tmpdir/Dockerfile -t antidotedb:local-build .
+	docker build -f Dockerfile.antidote -t antidotedb:local-build .
 
 docker-run: docker-build
 	docker run -d --name antidote -p "8087:8087" antidotedb:local-build
