@@ -5,7 +5,8 @@
   {mod, {vx_client_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    backoff
    ]},
   {env,[]},
   {modules, []},
