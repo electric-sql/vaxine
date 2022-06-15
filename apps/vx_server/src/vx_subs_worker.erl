@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -include_lib("vx_server/include/vx_proto.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([ start_link/3,
           init/1,
@@ -51,13 +52,13 @@ handle_info({tcp, Socket, Data}, #state{transport = Transport} = State) ->
             {noreply, State}
     catch
         Type:Error:Stack ->
-            logger:error("~p: ~p~n~p~n When handling request ~p~n",
+            ?LOG_ERROR("~p: ~p~n~p~n When handling request ~p~n",
                          [Type, Error, Stack, Data]),
             ok = Transport:send(Socket, mk_error(bad_proto)),
             {stop, {error, bad_proto}}
     end;
 handle_info({tcp_error, _, Reason}, #state{socket = Socket, transport = Transport}) ->
-    logger:warning("Socket error: ~p", [Reason]),
+    ?LOG_ERROR("Socket error: ~p", [Reason]),
     Transport:close(Socket),
     {stop, {error, Reason}};
 handle_info({tcp_closed, _}, #state{}) ->
