@@ -132,14 +132,14 @@ handle_cast(#keys_notif{keys = Keys, snapshot = Sn, partition = Partition} = E, 
     maybe_keys_notifications(SubID2Keys, State0),
 
     SnOrdered1 = add_snapshot_to_queue(Sn, maps:keys(SubID2Keys), State1#state.sn2subs),
-    SnOrdered2 = maybe_snapshot_notifications(PSn, SnOrdered1),
+    {_, SnOrdered2} = maybe_snapshot_notifications(PSn, SnOrdered1),
 
     {noreply, State1#state{ sn2subs = SnOrdered2 }};
 handle_cast(#ping_notif{snapshot = Sn, partition = Partition} = E, State0) ->
     ?LOG_DEBUG("ping notification ~p~n", [E]),
     {PSn, State1} = update_partial_snapshot(Sn, Partition, State0),
 
-    SnOrdered2 = maybe_snapshot_notifications(PSn, State1#state.sn2subs),
+    {_, SnOrdered2} = maybe_snapshot_notifications(PSn, State1#state.sn2subs),
     {noreply, State1#state{ sn2subs = SnOrdered2 }};
 
 handle_cast(Msg, State) ->
@@ -253,7 +253,7 @@ maybe_keys_notifications(SubID2Keys, #state{} = State) ->
     ok.
 
 -spec maybe_snapshot_notifications(sn(), vector_orddict:vector_orddict()) ->
-          vector_orddict:vector_orddict().
+          { [{sn(), [sub_id()]}],  vector_orddict:vector_orddict()}.
 maybe_snapshot_notifications(PSn, SnOrdered0) ->
     ReverseOrder = lists:reverse( vector_orddict:to_list(SnOrdered0) ),
     {ToNotify, SnOrderRemain} =
@@ -266,12 +266,13 @@ maybe_snapshot_notifications(PSn, SnOrdered0) ->
                           false
                   end
           end, [], ReverseOrder),
-    {ToNotify, vector_orddict:from_list(SnOrderRemain)}.
+    {lists:reverse(ToNotify), vector_orddict:from_list(
+                                lists:reverse(SnOrderRemain))}.
 
 dropsplit(Fun, InitAcc, [H | Rest] = L) ->
     case Fun(H, InitAcc) of
         {true, Acc} ->
-            dropsplit(Fun, [Acc | InitAcc], Rest);
+            dropsplit(Fun, Acc, Rest);
         false ->
             {InitAcc, L}
     end;
@@ -298,21 +299,20 @@ all_defined(VcMap) ->
 
 -ifdef(EUNIT).
 
--define(k1, <<"key1">>).
--define(k2, <<"key2">>).
--define(k3, <<"key3">>).
+-define(k(I), erlang:list_to_binary(io_lib:format("key~p",[I]))).
 -define(v(A, B, C), vectorclock:from_list([{dc1, A}, {dc2, B}, {dc3, C}])).
 
 simple_new_client_test() ->
     erlang:process_flag(trap_exit, true),
 
     {ok, Pid} = vx_subs_server:start_link(),
-    SubPid = spawn_link(fun() ->
-                                ok = vx_subs_server:add_new_client(none),
-                                {ok, SubId} = vx_subs_server:subscribe([ ?k1, ?k2, ?k3 ]),
-                                ok = vx_subs_server:unsubscribe(SubId),
-                                exit(normal)
-                        end),
+    SubPid = spawn_link(
+               fun() ->
+                       ok = vx_subs_server:add_new_client(none),
+                       {ok, SubId} = vx_subs_server:subscribe([ ?k(1), ?k(2), ?k(3) ]),
+                       ok = vx_subs_server:unsubscribe(SubId),
+                       exit(normal)
+               end),
     receive
         {'EXIT', SubPid, normal} ->
             ok
@@ -332,12 +332,13 @@ simple_snapshot_queue_test() ->
     {Notify, Remaining} = maybe_snapshot_notifications(?v(2,1,1), Q5),
     ?assertEqual([
                   {?v(1,1,1), [ref1]},
-                  {?v(1,2,1), [ref2]},
                   {?v(2,1,1), [ref1]}
                  ], Notify
                 ),
-    ?assertEqual([ {?v(1,3,1), [ref4, ref1]},
-                   {?v(2,2,1), [ref1]}
-                 ], lists:reverse(vector_orddict:from_list(Remaining))).
+    ?assertEqual([
+                  {?v(1,2,1), [ref2]},
+                  {?v(2,2,1), [ref2]},
+                  {?v(1,3,1), [ref4, ref1]}
+                 ], lists:reverse(vector_orddict:to_list(Remaining))).
 
 -endif.

@@ -27,7 +27,7 @@ start_link(Ref, Transport, ProtoOpts) ->
 init({Ref, Transport, _Opts}) ->
     {ok, Socket} = ranch:handshake(Ref),
     ok = Transport:setopts(Socket, [{packet, 4}, {active, once}]),
-    vx_subs_server:notify_new_client(self(), Socket),
+    vx_subs_server:add_new_client(Socket),
     gen_server:enter_loop(?MODULE, _Opts,
                           #state{socket = Socket, transport = Transport,
                                  server_mon =
