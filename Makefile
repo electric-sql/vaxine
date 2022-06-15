@@ -62,7 +62,7 @@ stage :
 test: test-vaxine test-vax
 
 test-vaxine:
-	${REBAR} eunit
+	${REBAR} eunit --verbose
 
 test-vax:
 	make test -C apps/vax

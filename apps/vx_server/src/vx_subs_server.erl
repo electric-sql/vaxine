@@ -22,19 +22,8 @@
 -endif.
 -include("vx_server.hrl").
 
--export_type([sub_id/0]).
+-export_type([sub_id/0, keys_notif/0, ping_notif/0]).
 
--record(keys_notif, { keys :: [ key() ],
-                       snapshot :: sn(),
-                       partition :: partition()
-                     }).
-
--record(ping_notif, { snapshot :: sn(),
-                      partition :: partition()
-                    }).
-
--type keys_notif() :: #keys_notif{}.
--type ping_notif() :: #ping_notif{}.
 
 -record(state, { clients = [] ::
                    [{WorkerPid :: pid(),
@@ -353,7 +342,22 @@ all_defined(VcMap) ->
 -define(k(I), erlang:list_to_binary(io_lib:format("key~p",[I]))).
 -define(v(A, B, C), vectorclock:from_list([{dc1, A}, {dc2, B}, {dc3, C}])).
 
-simple_new_client_test() ->
+setup() ->
+    meck:new(vx_server_utils),
+    meck:expect(vx_server_utils, get_key_origin, fun(_) -> {0, node()} end),
+    [vx_server_utils].
+
+teardown(Modules) ->
+    meck:unload(Modules).
+
+simple_sub_test_() ->
+    {foreach, fun setup/0, fun teardown/1,
+     [
+      {"simple client test", fun simple_new_client/0}
+     ]
+    }.
+
+simple_new_client() ->
     erlang:process_flag(trap_exit, true),
 
     {ok, Pid} = vx_subs_server:start_link(),
