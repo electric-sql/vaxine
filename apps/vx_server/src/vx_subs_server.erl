@@ -177,10 +177,27 @@ is_active_client(Pid, State) ->
 
 cleanup_client_int(Pid, State = #state{clients = Clients}) ->
     case lists:keytake(Pid, 1, Clients) of
-        {value, {_Socket, MonRef}, Clients1} ->
+        {value, {Pid, {_Socket, MonRef, SubIds}}, Clients1} ->
             catch erlang:demonitor(MonRef),
-
-            State#state{clients = Clients1
+            {Subs1, Keys2Subs1} =
+                lists:foldl(
+                  fun(SubId, {SubsA, Key2SubsA}) ->
+                      {value, {_SubId, {Keys, _SN, Pid}}, SubsA1} =
+                          lists:keytake(SubId, 1, SubsA),
+                      Keys2SubsA1 = lists:foldl(
+                                      fun(Key, Key2Subs) ->
+                                              case Key2Subs of
+                                                  M = #{ Key := [S] } when S =:= SubId ->
+                                                      maps:remove(Key, M);
+                                                  M = #{ Key := V } ->
+                                                      maps:put(Key, lists:delete(SubId, V), M)
+                                              end
+                                      end, Key2SubsA, Keys),
+                      {SubsA1, Keys2SubsA1}
+                  end, {State#state.subs, State#state.keys2subs}, SubIds),
+            State#state{clients = Clients1,
+                        subs = Subs1,
+                        keys2subs = Keys2Subs1
                        };
         false ->
             State
@@ -190,7 +207,7 @@ cleanup_client_int(Pid, State = #state{clients = Clients}) ->
 add_sub_int(Pid, Keys, Snapshot, State) ->
     SubId = make_ref(),
 
-    _ClientInfo = {Pid, {P, M, S}} = lists:keyfind(Pid, 1, State#state.clients),
+    _ClientInfo = {_Pid, {P, M, S}} = lists:keyfind(Pid, 1, State#state.clients),
     State1 = State#state{
                subs = [{ SubId, {Keys, Snapshot, Pid} } | State#state.subs ],
                clients = lists:keyreplace(Pid, 1, State#state.clients,
