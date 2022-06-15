@@ -17,15 +17,11 @@
         ]).
 
 -include_lib("kernel/include/logger.hrl").
-
 -ifdef(EUNIT).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
+-include("vx_server.hrl").
 
--type partition() :: integer().
--type sn() :: antidote:snapshot_time().
--type key() :: binary().
--type sub_id() :: reference().
 -export_type([sub_id/0]).
 
 -record(keys_notif, { keys :: [ key() ],
@@ -132,7 +128,11 @@ handle_cast(#keys_notif{keys = Keys, snapshot = Sn, partition = Partition} = E, 
     maybe_keys_notifications(SubID2Keys, State0),
 
     SnOrdered1 = add_snapshot_to_queue(Sn, maps:keys(SubID2Keys), State1#state.sn2subs),
-    {_, SnOrdered2} = maybe_snapshot_notifications(PSn, SnOrdered1),
+    {SnNotifs, SnOrdered2} = maybe_snapshot_notifications(PSn, SnOrdered1),
+    lists:foreach(
+      fun({SubSn, SubIds}) ->
+              send_snapshot_notification(SubSn, SubIds)
+      end, SnNotifs),
 
     {noreply, State1#state{ sn2subs = SnOrdered2 }};
 handle_cast(#ping_notif{snapshot = Sn, partition = Partition} = E, State0) ->
@@ -206,15 +206,50 @@ cleanup_client_int(Pid, State = #state{clients = Clients}) ->
 %% Invariant - this call expects client to be in the state
 add_sub_int(Pid, Keys, Snapshot, State) ->
     SubId = make_ref(),
-
+    {Key2Subs1, Idx2Keys} =
+        store_sub_keys(
+          SubId, Keys, State#state.keys2subs, State#state.proxies),
     _ClientInfo = {_Pid, {P, M, S}} = lists:keyfind(Pid, 1, State#state.clients),
+    Proxies1 = add_proxies(Idx2Keys, State#state.proxies),
+
     State1 = State#state{
                subs = [{ SubId, {Keys, Snapshot, Pid} } | State#state.subs ],
                clients = lists:keyreplace(Pid, 1, State#state.clients,
                                           {P, M, [SubId | S ]}
-                                         )
+                                         ),
+               keys2subs = Key2Subs1,
+               proxies = Proxies1
               },
     {SubId, State1}.
+
+store_sub_keys(SubId, Keys, Keys2Subs, Proxies) ->
+    lists:foldl(
+      fun(Key, {Key2SubsAcc, Idx2KeysAcc}) ->
+              case Key2SubsAcc of
+                  #{ Key := SubIds } ->
+                      { Key2SubsAcc#{Key => [SubId | SubIds]},
+                        Idx2KeysAcc
+                      };
+                  #{} ->
+                      Key2SubsAcc1 = maps:put(Key, [SubId], Key2SubsAcc),
+                      {Partition, _} = IdxNode =
+                          vx_server_utils:get_key_origin(Key),
+                      case maps:is_key(Partition, Proxies) of
+                          true ->
+                              { Key2SubsAcc1, Idx2KeysAcc };
+                          false ->
+                              { Key2SubsAcc1,
+                                maps:update_with(IdxNode,
+                                                 fun(KS) -> [Key | KS] end,
+                                                 [Key], Idx2KeysAcc)
+                              }
+                      end
+              end
+      end, {Keys2Subs, #{}}, Keys).
+
+add_proxies(_Idx2Keys, Proxies) ->
+    %% FIXME: Add implementation
+    Proxies.
 
 remove_sub_int(SubId, State) ->
     case lists:keytake(SubId, 1, State#state.subs) of
@@ -266,7 +301,7 @@ add_snapshot_to_queue(Sn, SubIds, SnOrdered0) ->
             vector_orddict:from_list(SnOrderedList1)
     end.
 
-maybe_keys_notifications(SubID2Keys, #state{} = State) ->
+maybe_keys_notifications(_SubID2Keys, #state{} = _State) ->
     ok.
 
 -spec maybe_snapshot_notifications(sn(), vector_orddict:vector_orddict()) ->
@@ -296,8 +331,7 @@ dropsplit(Fun, InitAcc, [H | Rest] = L) ->
 dropsplit(_Fun, Init, []) ->
     {Init, []}.
 
-
-send_snapshot_notification(SN, SubIds) ->
+send_snapshot_notification(_SN, _SubIds) ->
     ok.
 
 %% FIXME: Probably all_defined should be called on proxies only
