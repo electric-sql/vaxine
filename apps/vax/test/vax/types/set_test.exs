@@ -45,11 +45,10 @@ defmodule Vax.Types.SetTest do
   describe "cast_put/3" do
     test "properly adds items to set", %{integer_set: int_set} do
       changeset =
-        {%{set: MapSet.new([10])}, %{set: int_set}}
-        |> Ecto.Changeset.change()
-        |> Set.cast_put(:set, 20)
+        {%{}, %{set: int_set}}
+        |> Set.cast_put(:set, 10)
 
-      assert Ecto.Changeset.get_field(changeset, :set) == MapSet.new([10, 20])
+      assert Ecto.Changeset.get_field(changeset, :set) == MapSet.new([10])
     end
   end
 
@@ -57,7 +56,6 @@ defmodule Vax.Types.SetTest do
     test "properly deletes items from set", %{integer_set: int_set} do
       changeset =
         {%{set: MapSet.new([10])}, %{set: int_set}}
-        |> Ecto.Changeset.change()
         |> Set.cast_delete(:set, 10)
 
       assert Ecto.Changeset.get_field(changeset, :set) == MapSet.new([])

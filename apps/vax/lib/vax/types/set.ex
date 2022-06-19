@@ -72,13 +72,28 @@ defmodule Vax.Types.Set do
   end
 
   def cast_put(changeset, field, value) do
-    mapset = Ecto.Changeset.get_field(changeset, field) || MapSet.new()
-    Ecto.Changeset.put_change(changeset, field, MapSet.put(mapset, value))
+    mapset =
+      changeset
+      |> get_field_with_default(field, MapSet.new())
+      |> MapSet.put(value)
+
+    Ecto.Changeset.change(changeset, %{field => mapset})
   end
 
   def cast_delete(changeset, field, value) do
-    mapset = Ecto.Changeset.get_field(changeset, field) || MapSet.new()
-    Ecto.Changeset.put_change(changeset, field, MapSet.delete(mapset, value))
+    mapset =
+      changeset
+      |> get_field_with_default(field, MapSet.new())
+      |> MapSet.delete(value)
+
+    Ecto.Changeset.change(changeset, %{field => mapset})
+  end
+
+  defp get_field_with_default(changeset, field, default) do
+    changeset
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.get_field(field)
+    |> Kernel.||(default)
   end
 
   defp map_while_into_set(enum, fun) do
