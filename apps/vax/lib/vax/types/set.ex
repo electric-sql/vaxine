@@ -71,6 +71,16 @@ defmodule Vax.Types.Set do
     |> :antidotec_set.new()
   end
 
+  def cast_put(changeset, field, value) do
+    mapset = Ecto.Changeset.get_field(changeset, field) || MapSet.new()
+    Ecto.Changeset.put_change(changeset, field, MapSet.put(mapset, value))
+  end
+
+  def cast_delete(changeset, field, value) do
+    mapset = Ecto.Changeset.get_field(changeset, field) || MapSet.new()
+    Ecto.Changeset.put_change(changeset, field, MapSet.delete(mapset, value))
+  end
+
   defp map_while_into_set(enum, fun) do
     enum
     |> Enum.reduce_while([], fn el, acc ->

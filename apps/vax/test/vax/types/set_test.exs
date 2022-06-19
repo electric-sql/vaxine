@@ -41,4 +41,26 @@ defmodule Vax.Types.SetTest do
       assert [20] == :sets.to_list(removes) |> Enum.map(&:erlang.binary_to_term/1)
     end
   end
+
+  describe "cast_put/3" do
+    test "properly adds items to set", %{integer_set: int_set} do
+      changeset =
+        {%{set: MapSet.new([10])}, %{set: int_set}}
+        |> Ecto.Changeset.change()
+        |> Set.cast_put(:set, 20)
+
+      assert Ecto.Changeset.get_field(changeset, :set) == MapSet.new([10, 20])
+    end
+  end
+
+  describe "cast_delete/3" do
+    test "properly deletes items from set", %{integer_set: int_set} do
+      changeset =
+        {%{set: MapSet.new([10])}, %{set: int_set}}
+        |> Ecto.Changeset.change()
+        |> Set.cast_delete(:set, 10)
+
+      assert Ecto.Changeset.get_field(changeset, :set) == MapSet.new([])
+    end
+  end
 end
