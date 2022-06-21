@@ -96,14 +96,15 @@ to_ops(BoundObject, #antidote_map{values=Values, new_values=NewValues, removes=R
 -spec update_ops(any(), map()) -> list().
 update_ops(BoundObject, Map) ->
   List = maps:to_list(Map),
-  lists:map(fun({{Key, Type}, Value}) ->
+  Ops = lists:map(fun({{Key, Type}, Value}) ->
               Mod = antidotec_datatype:module_for_crdt_type(Type),
               %% {_, b, c} -> {Key, {b, c}} for arbitrarily sized tuples
               Ops = lists:map(fun(Op) -> {{Key, Type}, erlang:delete_element(1, Op)} end,
                               Mod:to_ops({Key, Type}, Value)),
               {BoundObject, update, Ops}
             end,
-            List).
+            List),
+  lists:filter(fun({_Object, update, UpdateOps}) -> UpdateOps /= [] end, Ops).
 
 is_type(T) -> is_record(T, antidote_map).
 type() -> map.
