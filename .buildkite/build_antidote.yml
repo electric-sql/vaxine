@@ -10,6 +10,5 @@ steps:
   - label: ":whale: Build & push the antidote container"
     command:
       - "SHORTSHA=$(echo $BUILDKITE_COMMIT | head -c 7)"
-      - "docker build -f Dockerfile.antidote -t ${DOCKER_REPO?}/${IMAGE_NAME?}:latest -t ${DOCKER_REPO?}/${IMAGE_NAME?}:$$SHORTSHA ."
-      - "docker push ${DOCKER_REPO?}/${IMAGE_NAME?}:$$SHORTSHA"
-      - "docker push ${DOCKER_REPO?}/${IMAGE_NAME?}:latest"
+      - "docker buildx build --platform linux/arm64/v8,linux/amd64 --push -f Dockerfile.antidote -t ${DOCKER_REPO?}/${IMAGE_NAME?}:latest -t ${DOCKER_REPO?}/${IMAGE_NAME?}:$$SHORTSHA ."
+
