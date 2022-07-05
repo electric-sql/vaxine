@@ -68,15 +68,19 @@ defmodule Vax.Adapter.Schema do
   end
 
   def delete(repo, schema, _options) do
-    Adapter.execute_static_transaction(repo, fn conn, tx_id ->
-      schema_primary_key = Helpers.schema_primary_key!(schema.__struct__)
-      primary_key = Map.get(schema, schema_primary_key)
-      object = Helpers.build_object(schema.__meta__.source, primary_key, @bucket)
+    repo.transaction(
+      fn ->
+        {conn, tx_id} = Adapter.get_transaction_data()
+        schema_primary_key = Helpers.schema_primary_key!(schema.__struct__)
+        primary_key = Map.get(schema, schema_primary_key)
+        object = Helpers.build_object(schema.__meta__.source, primary_key, @bucket)
 
-      :ok = AntidoteClient.update_objects(conn, [{object, :reset, {}}], tx_id)
+        :ok = AntidoteClient.update_objects(conn, [{object, :reset, {}}], tx_id)
 
-      {:ok, schema}
-    end)
+        {:ok, schema}
+      end,
+      static: true
+    )
   end
 
   def delete!(repo, schema, opts) do
@@ -131,9 +135,13 @@ defmodule Vax.Adapter.Schema do
   defp compute_ops_and_update(repo, object, schema, map) do
     ops = :antidotec_map.to_ops(object, map)
 
-    Adapter.execute_static_transaction(repo, fn conn, tx_id ->
-      :ok = AntidoteClient.update_objects(conn, ops, tx_id)
-      {:ok, repo.reload(schema)}
-    end)
+    repo.transaction(
+      fn ->
+        {conn, tx_id} = Adapter.get_transaction_data()
+        :ok = AntidoteClient.update_objects(conn, ops, tx_id)
+        {:ok, repo.reload(schema)}
+      end,
+      static: true
+    )
   end
 end

@@ -32,6 +32,15 @@ defmodule Vax.Adapter.AntidoteClient do
     end)
   end
 
+  @spec commit_transaction(conn :: pid(), tx_id :: term()) ::
+          {:ok, tx_id :: binary()} | {:error, term()}
+  def commit_transaction(conn, tx_id) do
+    :telemetry.span([:vax, :commit_transaction], %{tx_id: tx_id}, fn ->
+      result = :antidotec_pb.commit_transaction(conn, tx_id)
+      {result, %{tx_id: tx_id}}
+    end)
+  end
+
   defp start_transaction_metadata(last_tx_id, result \\ nil)
 
   defp start_transaction_metadata(last_tx_id, {:ok, tx_id}),

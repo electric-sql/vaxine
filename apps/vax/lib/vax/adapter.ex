@@ -12,6 +12,7 @@ defmodule Vax.Adapter do
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Queryable
   @behaviour Ecto.Adapter.Storage
+  @behaviour Ecto.Adapter.Transaction
 
   @impl Ecto.Adapter.Queryable
   def stream(_adapter_meta, _query_meta, _query_cache, _params, _options) do
@@ -33,28 +34,32 @@ defmodule Vax.Adapter do
     schema = Query.select_schema(query)
     defaults = struct(schema)
 
-    execute_static_transaction(adapter_meta.repo, fn conn, tx_id ->
-      {:ok, results} = AntidoteClient.read_objects(conn, objs, tx_id)
+    adapter_meta.repo.transaction(
+      fn ->
+        {conn, tx_id} = get_transaction_data()
+        {:ok, results} = AntidoteClient.read_objects(conn, objs, tx_id)
 
-      results =
-        for result <- results,
-            {:antidote_map, values, _adds, _removes} = result,
-            values != %{} do
-          Enum.map(fields, fn field ->
-            field_type = schema.__schema__(:type, field)
-            field_default = Map.get(defaults, field)
+        results =
+          for result <- results,
+              {:antidote_map, values, _adds, _removes} = result,
+              values != %{} do
+            Enum.map(fields, fn field ->
+              field_type = schema.__schema__(:type, field)
+              field_default = Map.get(defaults, field)
 
-            Vax.Adapter.Helpers.get_antidote_map_field_or_default(
-              result,
-              Atom.to_string(field),
-              field_type,
-              field_default
-            )
-          end)
-        end
+              Vax.Adapter.Helpers.get_antidote_map_field_or_default(
+                result,
+                Atom.to_string(field),
+                field_type,
+                field_default
+              )
+            end)
+          end
 
-      {Enum.count(results), results}
-    end)
+        {Enum.count(results), results}
+      end,
+      static: true
+    )
   end
 
   @impl Ecto.Adapter
@@ -192,15 +197,6 @@ defmodule Vax.Adapter do
       def delete!(schema, opts \\ []) do
         Vax.Adapter.Schema.delete!(__MODULE__, schema, opts)
       end
-
-      @doc """
-      Executes a static transaction
-      """
-      @spec execute_static_transaction((conn :: pid(), tx_id :: term() -> result :: term())) ::
-              term()
-      def execute_static_transaction(fun) do
-        Vax.Adapter.execute_static_transaction(__MODULE__, fun)
-      end
     end
   end
 
@@ -219,17 +215,62 @@ defmodule Vax.Adapter do
     :up
   end
 
+  @impl Ecto.Adapter.Transaction
+  def in_transaction?(_adapter_meta) do
+    not is_nil(Process.get(:vax_tx_id))
+  end
+
+  @impl Ecto.Adapter.Transaction
+  def rollback(_adapter_meta, _value) do
+    raise "Not implemented"
+  end
+
+  @impl Ecto.Adapter.Transaction
+  def transaction(adapter_meta, opts, fun) do
+    checkout(adapter_meta, [], fn ->
+      conn = get_conn()
+
+      if in_transaction?(adapter_meta) do
+        fun.()
+      else
+        try do
+          {:ok, tx_id} = start_or_continue_transaction(conn, opts[:static] || false)
+
+          if opts[:static] do
+            fun.()
+          else
+            result = fun.()
+
+            case AntidoteClient.commit_transaction(conn, tx_id) do
+              {:ok, _tx_id} ->
+                result
+
+              {:error, _e} = error ->
+                error
+            end
+          end
+        after
+          Process.put(:vax_tx_id, nil)
+        end
+      end
+    end)
+  end
+
   @doc """
   Reads a counter
   """
   @spec read_counter(repo :: atom() | pid(), key :: binary()) :: integer()
   def read_counter(repo, key) do
-    execute_static_transaction(repo, fn conn, tx_id ->
-      obj = {key, :antidote_crdt_counter_pn, @bucket}
-      {:ok, [result]} = AntidoteClient.read_objects(conn, [obj], tx_id)
+    repo.transaction(
+      fn ->
+        {conn, tx_id} = get_transaction_data()
+        obj = {key, :antidote_crdt_counter_pn, @bucket}
+        {:ok, [result]} = AntidoteClient.read_objects(conn, [obj], tx_id)
 
-      :antidotec_counter.value(result)
-    end)
+        :antidotec_counter.value(result)
+      end,
+      static: true
+    )
   end
 
   @doc """
@@ -237,29 +278,40 @@ defmodule Vax.Adapter do
   """
   @spec increment_counter(repo :: atom() | pid(), key :: binary(), amount :: integer()) :: :ok
   def increment_counter(repo, key, amount) do
-    execute_static_transaction(repo, fn conn, tx_id ->
-      obj = {key, :antidote_crdt_counter_pn, @bucket}
-      counter = :antidotec_counter.increment(amount, :antidotec_counter.new())
-      counter_update_ops = :antidotec_counter.to_ops(obj, counter)
+    repo.transaction(
+      fn ->
+        {conn, tx_id} = get_transaction_data()
+        obj = {key, :antidote_crdt_counter_pn, @bucket}
+        counter = :antidotec_counter.increment(amount, :antidotec_counter.new())
+        counter_update_ops = :antidotec_counter.to_ops(obj, counter)
 
-      AntidoteClient.update_objects(conn, counter_update_ops, tx_id)
-    end)
+        AntidoteClient.update_objects(conn, counter_update_ops, tx_id)
+      end,
+      static: true
+    )
   end
 
   defp get_conn(), do: Process.get(:vax_checked_out_conn) || raise("Missing connection")
 
-  def execute_static_transaction(repo, fun) when is_atom(repo) or is_pid(repo) do
-    meta = Ecto.Adapter.lookup_meta(repo)
-    execute_static_transaction(meta, fun)
+  def get_transaction_data do
+    {Process.get(:vax_checked_out_conn), Process.get(:vax_tx_id)}
   end
 
-  def execute_static_transaction(meta, fun) do
-    checkout(meta, [], fn ->
-      conn = get_conn()
+  defp start_or_continue_transaction(conn, static?) do
+    case Process.get(:vax_tx_id) do
+      nil ->
+        {:ok, tx_id} =
+          if static? do
+            AntidoteClient.start_transaction(conn, :ignore, static: true)
+          else
+            AntidoteClient.start_transaction(conn, :ignore)
+          end
 
-      {:ok, tx_id} = AntidoteClient.start_transaction(conn, :ignore, static: true)
+        Process.put(:vax_tx_id, tx_id)
+        {:ok, tx_id}
 
-      fun.(conn, tx_id)
-    end)
+      tx_id ->
+        {:ok, tx_id}
+    end
   end
 end
