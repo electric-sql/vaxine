@@ -60,6 +60,47 @@ defmodule Vax.AdapterIntegrationTest do
     assert 30 = TestRepo.read_counter(id)
   end
 
+  # Step by step:
+  # 1. Transaction 2 starts
+  # 2. Transaction 1 starts
+  # 3. Transaction 1 increments the counter by 10, reads it, asserts its 10
+  # 4. Transaction 2 reads the counter, asserts its 0
+  # 5. Both transactions commit
+  test "Transaction support" do
+    id = Ecto.UUID.generate()
+    parent = self()
+
+    p1 =
+      spawn(fn ->
+        assert_receive {:start, p2}
+
+        TestRepo.transaction(fn ->
+          assert 0 = TestRepo.read_counter(id)
+          assert :ok = TestRepo.increment_counter(id, 10)
+          assert 10 = TestRepo.read_counter(id)
+          send(p2, :read)
+          assert_receive :commit
+        end)
+
+        send(parent, :transaction_1_commited)
+      end)
+
+    _p2 =
+      spawn(fn ->
+        TestRepo.transaction(fn ->
+          send(p1, {:start, self()})
+          assert_receive :read
+          assert 0 = TestRepo.read_counter(id)
+        end)
+
+        send(parent, :transaction_2_commited)
+        send(p1, :commit)
+      end)
+
+    assert_receive :transaction_2_commited
+    assert_receive :transaction_1_commited
+  end
+
   describe "insert/2" do
     test "inserts raw struct" do
       id = Ecto.UUID.generate()

@@ -11,7 +11,8 @@ defmodule Vax.Adapter.Logger do
       [
         [:vax, :read_objects, :stop],
         [:vax, :update_objects, :stop],
-        [:vax, :start_transaction, :stop]
+        [:vax, :start_transaction, :stop],
+        [:vax, :commit_transaction, :stop]
       ],
       &__MODULE__.handle_event/4,
       nil
@@ -69,6 +70,19 @@ defmodule Vax.Adapter.Logger do
     |> Logger.debug()
   end
 
+  def handle_event([:vax, :commit_transaction, :stop], measurements, metadata, _handler_meta) do
+    [
+      "Vax",
+      " - ",
+      "COMMIT TRANSACTION",
+      " - ",
+      "Took #{duration_to_binary(measurements.duration)} ",
+      " - Transaction id: ",
+      tx_id_to_binary(metadata.tx_id)
+    ]
+    |> Logger.debug()
+  end
+
   defp objects_to_iolist(objects) do
     Enum.map(objects, fn {key, _type, _bucket} -> "\n- " <> key end)
   end
@@ -91,5 +105,6 @@ defmodule Vax.Adapter.Logger do
     "#{duration_in_us} μs"
   end
 
-  defp tx_id_to_binary({_kind, {tx_vector_clock, _opts}}), do: inspect(tx_vector_clock)
+  defp tx_id_to_binary({:static, {tx_vector_clock, _opts}}), do: inspect(tx_vector_clock)
+  defp tx_id_to_binary({:interactive, tx_vector_clock}), do: inspect(tx_vector_clock)
 end
