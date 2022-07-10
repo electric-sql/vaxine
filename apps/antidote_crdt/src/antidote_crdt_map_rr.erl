@@ -33,7 +33,7 @@
 %%  if not create a map entry where value is initial state of the embedded
 %%    data type (a call to the create function of the embedded data type)
 %%
-%% Update operations on entries(embedded CRDTs) are calls to the update fucntions of the entries.
+%% Update operations on entries(embedded CRDTs) are calls to the update functions of the entries.
 %%
 %% Deleting an entry in the map:
 %%  1- calls the reset function of this entry (tries to reset entry to its initial state)

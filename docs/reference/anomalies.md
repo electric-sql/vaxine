@@ -43,7 +43,7 @@ The following table summarises the anomalies that occur with different database 
 
 ## Causality violation
 
-**Problem**:<br />Operations become visible before their dependencies are also made visible, influencing the user’s action. I.e.: the user acts on information that has already been superceeded.
+**Problem**:<br />Operations become visible before their dependencies are also made visible, influencing the user’s action. I.e.: the user acts on information that has already been superseded.
 
 **Example**:<br />Elements in a creativity application are organised by color; user changes the color of an element and arranges accordingly. Operations are delivered out of order. Another user sees that the element was positioned in the wrong group (according to the color) and moves the element to a different group.
 
@@ -219,7 +219,7 @@ The following table summarises the anomalies that occur with different database 
 
 **Example**:<br />Users use a spreadsheet to collect data points in one sheet and calculate summary info in another sheet. The template of the datapoints might be modified, affecting the columns that should be used to make the calculations. Meanwhile, the user working offline on the summary sheet might add new calculations referring to the old column positions.
 
-**Solution**:<br />Minimize divergence by synching replicas frequently; give feedback about the status of the connection.
+**Solution**:<br />Minimize divergence by syncing replicas frequently; give feedback about the status of the connection.
 
 ## Proximity bias
 

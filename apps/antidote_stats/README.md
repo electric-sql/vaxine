@@ -15,9 +15,9 @@ Before use, the following files have to be adjusted.
     * If Prometheus should survive crashses and retain its data, specify a volume for the Prometheus data
 
 * The [Grafana configuration file](monitoring/grafana-config/provisioning/datasources/all.yml):
-    * Specifiy the default address of the Prometheus data source
+    * Specify the default address of the Prometheus data source
 
 * The [Prometheus configuration file](monitoring/prometheus-config/prometheus.yml):
-    * Speficy which nodes to scrape
+    * Specify which nodes to scrape
 
 If the monitoring setup is used inside a docker network, make sure the antidote nodes are reachable from that network by Prometheus.

@@ -58,7 +58,7 @@ defmodule Vax.Type do
 
   def client_load(crdt) do
     case :antidotec_datatype.module_for_term(crdt) do
-      :undefined -> raise "unkown antidotec crdt: #{inspect(crdt)}"
+      :undefined -> raise "unknown antidotec crdt: #{inspect(crdt)}"
       mod -> {:ok, mod.value(crdt)}
     end
   end
