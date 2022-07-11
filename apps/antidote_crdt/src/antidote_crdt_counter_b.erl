@@ -311,10 +311,10 @@ transfer_test() ->
     ?assertEqual(4, local_permissions(r1, Counter2)),
     ?assertEqual(6, local_permissions(r2, Counter2)),
     ?assertEqual(10, permissions(Counter2)),
-    %% Test transference forbidden by lack of previously transfered resources.
+    %% Test transference forbidden by lack of previously transferred resources.
     OP_DS = downstream({transfer, {5, r2, r1}}, Counter2),
     ?assertEqual({error, no_permissions}, OP_DS),
-    %% Test transference enabled by previously transfered resources.
+    %% Test transference enabled by previously transferred resources.
     Counter3 = apply_op({transfer, {5, r1, r2}}, Counter2),
     ?assertEqual(9, local_permissions(r1, Counter3)),
     ?assertEqual(1, local_permissions(r2, Counter3)),

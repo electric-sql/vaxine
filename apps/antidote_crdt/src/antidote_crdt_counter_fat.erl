@@ -29,7 +29,7 @@
 %% antidote_crdt_counter_fat: A convergent, replicated, operation based Fat Counter
 %% The state of this fat counter is list of pairs where each pair is an integer
 %% and a related token.
-%% Basically when the counter recieves {increment, N} or {decrement, N} it generates
+%% Basically when the counter receives {increment, N} or {decrement, N} it generates
 %% a pair {N, NewToken}.
 %% On update, all seen tokens are removed and the new pair is then added to the state.
 %% This token keeps growing ("Fat" Counter) but it useful as it allows the reset
