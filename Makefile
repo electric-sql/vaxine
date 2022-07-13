@@ -114,13 +114,21 @@ dialyzer-vaxine:
 dialyzer-vax:
 	make dialyzer -C apps/vax
 
+CONTAINER_NAME=vaxine
+
 docker-build:
-	docker build -f Dockerfile.antidote -t antidotedb:local-build .
+	docker build -f Dockerfile.vaxine -t vaxine:local-build .
 
 docker-run: docker-build
-	docker run -d --name antidote -p "8087:8087" antidotedb:local-build
+	docker run --rm -d --name ${CONTAINER_NAME} \
+		-p "8087:8087" \
+		-p "8088:8088" \
+		vaxine:local-build
 
 docker-clean:
-ifneq ($(docker images -q antidotedb:local-build 2> /dev/null), "")
-	docker image rm -f antidotedb:local-build
+ifneq ($(docker images -q vaxine:local-build 2> /dev/null), "")
+	docker image rm -f vaxine:local-build
 endif
+
+docker-stop:
+	docker stop ${CONTAINER_NAME}
