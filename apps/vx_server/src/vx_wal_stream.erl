@@ -431,10 +431,11 @@ process_txns([{_, LogRecord} | Rest], RemainingOps, FinalizedTxns0) ->
 
 process_op(#log_operation{op_type = update, tx_id = TxId, log_payload = Payload},
            RemainingOps, FinalizedTxns) ->
-    {Key, Type} = { Payload#update_log_payload.key,
-                    Payload#update_log_payload.type
+    {Key, Type, Op} = { Payload#update_log_payload.key,
+                        Payload#update_log_payload.type,
+                        Payload#update_log_payload.op
                   },
-    {dict:append(TxId, {Key, Type}, RemainingOps), FinalizedTxns};
+    {dict:append(TxId, {Key, Type, Op}, RemainingOps), FinalizedTxns};
 process_op(#log_operation{op_type = prepare}, RemainingOps, FinalizedTxns) ->
     {RemainingOps, FinalizedTxns};
 process_op(#log_operation{op_type = abort, tx_id = TxId}, RemainingOps, FinalizedTxns) ->
@@ -466,16 +467,16 @@ process_op(#log_operation{op_type = commit, tx_id = TxId, log_payload = Payload}
     end.
 
 prepare_txn_operations(TxId, ST, TxOpsList0) ->
-    Unique = sets:to_list(sets:from_list(TxOpsList0)),
-    logger:debug("preprocess txn:~n ~p ~p ~p~n", [TxId, ST, Unique]),
-
-    TxOpsList1 =
+    TxOpsDict =   lists:foldl(fun({Key, Type, Op}, Acc) ->
+                                  dict:append({Key, Type}, Op, Acc)
+                              end, dict:new(), TxOpsList0),
+    TxKeys = sets:to_list(sets:from_list(lists:map(fun({Key, Type, _Op}) -> {Key, Type} end, TxOpsList0))),
+    TxMaterializedKeysWithOps =
         lists:map(fun({Key, Type}) ->
-                          {Key, Type, materialize(Key, Type, ST, TxId)}
-                  end, Unique),
-
-    logger:debug("processed txn:~n ~p ~p~n", [TxId, TxOpsList1]),
-    {TxId, TxOpsList1}.
+                          {Key, Type, materialize(Key, Type, ST, TxId), dict:fetch({Key, Type}, TxOpsDict)}
+                  end, TxKeys),
+    logger:info("processed txn:~n ~p ~p~n", [TxId, TxMaterializedKeysWithOps]),
+    {TxId, TxMaterializedKeysWithOps}.
 
 prepare_txn_operations(TxId, aborted) ->
     {TxId, aborted}.
