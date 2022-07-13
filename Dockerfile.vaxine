@@ -52,12 +52,12 @@ ENV MIX_ENV="prod"
 
 FROM runner_setup AS runner
 
-## Antidote configuration via environment variables
-COPY --from=builder --chown=nobody:root /app/_build/default/rel/antidote ./
+## Vaxine configuration via environment variables
+COPY --from=builder --chown=nobody:root /app/_build/default/rel/vaxine ./
 
 ### Data storage
 # where the logs and data are stored and exposed
-ENV ROOT_DIR_PREFIX="/antidote-data/" \
+ENV ROOT_DIR_PREFIX="/vaxine-data/" \
     DATA_DIR_PREFIX="data/" \
     LOGGER_DIR_PREFIX="log/" 
 RUN mkdir -p ${ROOT_DIR_PREFIX}
@@ -70,16 +70,15 @@ ENV \
     ### Inter-DC communication
     LOGREADER_PORT="8085" \
     PBSUB_PORT="8086" \
+    ANTIDOTE_PB_PORT="8087" \
+    VAXINE_PB_PORT="8088" \
     ### Erlang
     NODE_NAME="antidote@antidote" \
     COOKIE="secret"\
     ### Logger verbosity: debug, info, notice, warning, error, alert, critical
     DEBUG_LOGGER_LEVEL="info"
     
-
-### Public client
-ENV PB_PORT "8087"
-EXPOSE ${PB_PORT}
+EXPOSE ${LOGREADER_PORT} ${PBSUB_PORT} ${ANTIDOTE_PB_PORT} ${VAXINE_PB_PORT} ${HANDOFF_PORT}
 
 ## Antidote Features Configuration
 ##   Adjusting features for a node restart can have unexpected consequences
@@ -94,7 +93,7 @@ ENV ANTIDOTE_TXN_CERT="true" \
     ANTIDOTE_AUTO_START_READ_SERVERS="true"
 
 USER nobody
-ENTRYPOINT /app/bin/antidote foreground \
+ENTRYPOINT /app/bin/vaxine foreground \
     -riak_core handoff_port ${HANDOFF_PORT} \
     -riak_core ring_creation_size ${RING_SIZE} \
     -antidote txn_cert ${ANTIDOTE_TXN_CERT} \
@@ -106,7 +105,8 @@ ENTRYPOINT /app/bin/antidote foreground \
     -antidote auto_start_read_servers ${ANTIDOTE_AUTO_START_READ_SERVERS} \
     -antidote logreader_port ${LOGREADER_PORT} \
     -antidote pubsub_port ${PBSUB_PORT} \
-    -ranch pb_port ${PB_PORT} \
+    -ranch pb_port ${ANTIDOTE_PB_PORT} \
+    -vx_server pb_port ${VAXINE_PB_PORT} \
     -antidote_stats metrics_port ${METRICS_PORT} \
     -kernel logger_level ${DEBUG_LOGGER_LEVEL} \
     -kernel inet_dist_listen_min ${ERLANG_DIST_PORT_MIN} \
