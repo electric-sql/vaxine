@@ -6,7 +6,7 @@
     {logger, [
 
       {handler, default, logger_std_h,
-        #{level => info,
+        #{level => debug,
           formatter => {logger_formatter, #{single_line => false, max_size => 2048}},
           config => #{type => standard_io}}},
 
@@ -34,7 +34,7 @@
     %% has to be an exponent of 2
     %% low number will decrease file accesses (good for testing) and boot time
     %% high number enables scaling and generates smaller log files
-    {ring_creation_size, 64}
+    {ring_creation_size, 1}
   ]},
 
 
@@ -46,7 +46,7 @@
 
   {antidote, [
     %% antidote data directory
-    {data_dir, "${ROOT_DIR_PREFIX}${DATA_DIR_PREFIX}data_antidote"}
+    {data_dir, "${ROOT_DIR_PREFIX}${DATA_DIR_PREFIX}data_antidote"},
 
     %% stats:
     %% Enables or disables metrics collection for this node. Can be disabled on slow nodes to improve performance.
@@ -87,7 +87,7 @@
     %%                stored to disk (this is very slow in the current logging setup)
     %%        false -> all updates are sent to the operating system to be stored to disk (eventually), but are not guaranteed to be stored durably on disk
     %%                 when the reply is sent
-    %{sync_log, false},
+    {sync_log, false}
 
     %% %% enable_logging:
     %%        true -> writes to disk done by the logging_vnode are enabled

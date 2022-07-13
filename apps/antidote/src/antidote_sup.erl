@@ -107,5 +107,6 @@ init(_Args) ->
             MetaDataSenderSup,
             BCounterManager,
             PbSup,
-            AntidoteStats
+            AntidoteStats,
+            ?CHILD(logging_notification_server, worker, [])
         ]}}.

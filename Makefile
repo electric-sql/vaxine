@@ -61,8 +61,11 @@ stage :
 
 test: test-vaxine test-vax
 
+ifdef EUNIT_MODS
+EUNIT_MODULES=--module=${EUNIT_MODS}
+endif
 test-vaxine:
-	${REBAR} eunit
+	${REBAR} eunit --verbose ${EUNIT_MODULES}
 
 test-vax:
 	make test -C apps/vax
@@ -88,7 +91,14 @@ else
 
 endif
 
-systests: singledc multidc
+systests: singledc multidc test_vx_ct
+
+ifdef SUITE
+SUITE_OPT=--suite ${SUITE}
+endif
+
+test_vx_ct:
+	${REBAR} ct --dir apps/vx_server/test --cover --cover_export_name=vx_dc ${SUITE_OPT}
 
 docs:
 	${REBAR} doc skip_deps=true
