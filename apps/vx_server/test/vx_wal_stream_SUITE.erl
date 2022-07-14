@@ -85,7 +85,8 @@ single_txn(_Config) ->
     ct:log("message: ~p~n", [Msg]),
 
     K = key_format(Key, Bucket),
-    ?assertMatch({wal_msg, _Txn, [{K, Type, Value}]}, Msg),
+    Ops = [5],
+    ?assertMatch({wal_msg, _Txn, [{K, Type, Value, Ops}]}, Msg),
 
     ok = vx_wal_stream:stop_replication(Pid).
 
@@ -100,7 +101,8 @@ single_txn_from_history(_Config) ->
     ct:log("message: ~p~n", [Msg]),
 
     K = key_format(Key, Bucket),
-    ?assertMatch({wal_msg, _Txn, [{K, Type, Value}]}, Msg),
+    Ops = [5],
+    ?assertMatch({wal_msg, _Txn, [{K, Type, Value, Ops}]}, Msg),
 
     assert_receive(100),
 
@@ -117,7 +119,7 @@ single_txn_from_history2(_Config) ->
     ct:log("~p message: ~p~n", [?LINE, Msg]),
 
     K = key_format(Key, Bucket),
-    ?assertMatch({wal_msg, _Txn, [{K, Type, 5}]}, Msg),
+    ?assertMatch({wal_msg, _Txn, [{K, Type, 5, [5]}]}, Msg),
 
     assert_receive(100),
 
@@ -125,7 +127,8 @@ single_txn_from_history2(_Config) ->
     [Msg1] = assert_count(1, 1000),
     ct:log("~p message: ~p~n", [?LINE, Msg1]),
 
-    ?assertMatch({wal_msg, _Txn, [{K, Type, 11}]}, Msg1),
+    Ops2 = [6],
+    ?assertMatch({wal_msg, _Txn, [{K, Type, 11, Ops2}]}, Msg1),
 
     assert_receive(100),
     ok = vx_wal_stream:stop_replication(Pid).
@@ -146,7 +149,7 @@ single_txn_via_client(Config) ->
     K = key_format(Key, Bucket),
     ?assertMatch(#vx_client_msg{pid = C,
                                 msg = #vx_wal_txn{ txid = _Txid,
-                                                   ops = [{K, Type, 5}]
+                                                   ops = [{K, Type, 5, [5]}]
                                                  }}, Msg),
     ok = vx_client:stop_replication(C),
 
@@ -169,11 +172,11 @@ multiple_txns_via_client(_Config) ->
     K = key_format(Key, Bucket),
     ?assertMatch(#vx_client_msg{pid = C,
                                 msg = #vx_wal_txn{ txid = _Txid,
-                                                   ops = [{K, Type, 5}]
+                                                   ops = [{K, Type, 5, [5]}]
                                                  }}, Msg1),
     ?assertMatch(#vx_client_msg{pid = C,
                                 msg = #vx_wal_txn{ txid = _Txid,
-                                                   ops = [{K, Type, 11}]
+                                                   ops = [{K, Type, 11, [6]}]
                                                  }}, Msg2),
 
     {ok, SN1} = simple_update_value([{Key, 6}], <<"client_bucket">>),
@@ -181,7 +184,7 @@ multiple_txns_via_client(_Config) ->
     [Msg3] = assert_count(1, 1000),
     ?assertMatch(#vx_client_msg{pid = C,
                                 msg = #vx_wal_txn{ txid = _Txid,
-                                                   ops = [{K, Type, 17}]
+                                                   ops = [{K, Type, 17, [6]}]
                                                  }}, Msg3),
 
     ok = vx_client:stop_replication(C),
@@ -201,7 +204,7 @@ merged_values_within_txn(_Config) ->
     [Msg] = assert_count(1, 1000),
     ?assertMatch(#vx_client_msg{pid = C,
                                 msg = #vx_wal_txn{ txid = _Txid,
-                                                   ops = [{K, Type, 4}]
+                                                   ops = [{K, Type, 4, [2, 2]}]
                                                  }}, Msg),
     ok = vx_client:stop_replication(C),
     ok.
