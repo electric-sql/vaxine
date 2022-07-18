@@ -1323,8 +1323,7 @@ insert_log_record(Log, LogId, LogRecord, EnableLogging, Sync) ->
                 ?STATS({log_append, Log, erlang:byte_size(BinaryRecord)}),
 
                 while([fun() -> disk_log:blog(Log, BinaryRecord) end,
-                       fun() -> maybe_sync(Log, LogId, Sync, LogRecord) end,
-                       fun() -> maybe_notify(LogId, LogRecord) end
+                       fun() -> maybe_sync(Log, LogId, Sync, LogRecord) end
                       ]);
             false ->
                 ok
@@ -1340,18 +1339,6 @@ maybe_sync(Log, [_LogId], true,
            #log_record{log_operation = #log_operation{op_type = commit}}) ->
     disk_log:sync(Log);
 maybe_sync(_, _, _, _) ->
-    ok.
-
-maybe_notify([LogId], #log_record{log_operation = #log_operation{op_type = commit} = OP}) ->
-    TxId = OP#log_operation.tx_id,
-    CommitPayload = OP#log_operation.log_payload,
-    ok = logging_notification_server:notify_commit(
-           LogId, TxId,
-           CommitPayload#commit_log_payload.commit_time,
-           CommitPayload#commit_log_payload.snapshot_time
-          ),
-    ok;
-maybe_notify([_], _) ->
     ok.
 
 while([H|T]) ->
