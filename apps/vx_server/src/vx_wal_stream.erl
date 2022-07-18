@@ -168,7 +168,6 @@ log_path(Partition) ->
     LogId = LogFile ++ "--" ++ LogFile,
     filename:join(DataDir, LogId).
 
-
 init_stream({call, {Sender, _} = F}, {start_replication, Port}, Data) ->
     %% FIXME: We support only single partition for now
     {ok, FD} = open_log(Data#data.file_name),
