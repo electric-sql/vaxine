@@ -72,8 +72,8 @@ iterate_terms([{LogId, Op} | Rest], Cache) ->
 iterate_terms([], Cache) ->
     Cache.
 
-iterate_term(#log_record{version = V, op_number = OpNumber,
-                         bucket_op_number = BNumber, log_operation = Op}, Cache) ->
+iterate_term(#log_record{version = _V, op_number = OpNumber,
+                         bucket_op_number = _BNumber, log_operation = Op}, Cache) ->
     Cache1 = maybe_print_node(OpNumber, Cache),
     io:format("|~s|", [printable(OpNumber)]),
     print_operation(Op, Cache1),
@@ -87,13 +87,13 @@ print_operation(#log_operation{tx_id = TxId, op_type = OpType,
 
 print_payload(#prepare_log_payload{prepare_time = TM}) ->
     io:format(" prepare_time: ~p~n", [TM]);
-print_payload(#commit_log_payload{commit_time = {DC, CT}, snapshot_time = ST}) ->
+print_payload(#commit_log_payload{commit_time = {_DC, CT}, snapshot_time = ST}) ->
     io:format(" commit_time: ~p~n snapshot_time: ~p~n", [CT, ST]);
 print_payload(#update_log_payload{} = R) ->
     Fields = record_info(fields, update_log_payload),
     [_| Values] = tuple_to_list(R),
     Zip = lists:zip(Fields, Values),
-    lists:foreach(fun({K, undefined}) ->
+    lists:foreach(fun({_K, undefined}) ->
                           ok;
                      ({K, V}) ->
                           io:format(" ~p = ~p~n", [K, V])
