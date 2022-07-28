@@ -43,7 +43,7 @@ delete_handler(Args) ->
           ok.
 notify_commit(Partition, TxId, CommitTime, SnapshotTime) ->
     gen_event:sync_notify(?MODULE,
-                          {commit, Partition, TxId, CommitTime, SnapshotTime}).
+                          {commit, [Partition, TxId, CommitTime, SnapshotTime]}).
 
 %%------------------------------------------------------------------------------
 %% Internal functions
@@ -56,7 +56,7 @@ handle_call(Msg, State) ->
     State1 = apply_handler(Msg, State),
     {ok, _Reply = ok, State1}.
 
-handle_event(Msg, State) ->
+handle_event({commit, Msg}, State) ->
     try
         State1 = apply_handler(Msg, State),
         {ok, State1}
@@ -74,7 +74,7 @@ terminate(_Arg, _State) ->
 
 -spec apply_handler(term(), state()) -> state().
 apply_handler(Info, State = #state{handler = {M, F, HandlerState0}}) ->
-    case apply(M, F, [Info | HandlerState0]) of
+    case apply(M, F, HandlerState0 ++ Info) of
         ok ->
             State;
         {ok, HandlerState1} ->

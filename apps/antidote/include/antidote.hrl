@@ -128,10 +128,12 @@
     tx_id :: txid(),
     op_type ::
         update
+        %% Write-ahead-log specifics. Marks first update operation
+        %% in transaction for this partition
+        | update_start
         | prepare
         | commit
-        | abort
-        | noop,
+        | abort,
     log_payload :: any_log_payload()
 }).
 -type log_operation() :: #log_operation{}.

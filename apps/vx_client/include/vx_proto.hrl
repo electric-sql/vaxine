@@ -9,7 +9,12 @@
 -type antidote_type() :: module().
 -type antidote_snapshot_val() :: term().
 
--record(vx_cli_start_req, {opts = [] :: list()}).
+-type wal_offset() :: term().
+
+-record(vx_cli_start_req,
+        {
+         opts = [] :: [ {offset, none | wal_offset() | eof} ]
+        }).
 -record(vx_cli_stop_req, {rep_id = erlang:error(bad_msg) :: reference()}).
 
 -type vx_cli_req_msg() :: #vx_cli_start_req{} | #vx_cli_stop_req{}.
@@ -32,13 +37,18 @@
         }
        ).
 
+-type tx_ops() :: [ { antidote_key(),
+                      antidote_type(),
+                      antidote_snapshot_val()
+                    }
+                  ].
+
 -record(vx_wal_txn,
         { txid :: antidote:txid(),
-          ops :: [ { antidote_key(),
-                     antidote_type(),
-                     antidote_snapshot_val()
-                   }
-                 ]
+          dcid :: antidote:dcid(),
+          %% Offset for the current transaction.
+          wal_offset :: wal_offset(),
+          ops :: tx_ops()
         }).
 
 -record(vx_client_msg,

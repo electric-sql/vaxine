@@ -480,7 +480,7 @@ handle_command(
             %% of the number of updates per bucket
             NewBucketOpId =
                 case LogOperation#log_operation.op_type of
-                    update ->
+                    OpType when (OpType == update) orelse (OpType == update_start) ->
                         Bucket = (LogOperation#log_operation.log_payload)#update_log_payload.bucket,
                         BOpId = get_op_id(OpIdTable, {LogId, Bucket, MyDCID}),
                         #op_number{local = BLocal, global = BGlobal} = BOpId,
@@ -550,7 +550,7 @@ handle_command(
                         true = update_ets_op_id({LogId, MyDCID}, NewOpId, OpIdTable),
                         LogOperation = LogRecord#log_record.log_operation,
                         case LogOperation#log_operation.op_type of
-                            update ->
+                            OpType when (OpType == update) orelse (OpType == update_start) ->
                                 Bucket =
                                     (LogOperation#log_operation.log_payload)#update_log_payload.bucket,
                                 BOpId = get_op_id(OpIdTable, {LogId, Bucket, MyDCID}),
@@ -848,7 +848,7 @@ get_max_op_numbers([{LogId, LogRecord} | Rest], ClockTable, PrevMaxVector) ->
             commit ->
                 #commit_log_payload{commit_time = {DCID, TxCommitTime}} = LogPayload,
                 vectorclock:set(DCID, TxCommitTime, PrevMaxVector);
-            update ->
+            OpType when (OpType == update) orelse (OpType == update_start) ->
                 %% Update the per bucket opid count
                 Bucket = LogPayload#update_log_payload.bucket,
                 true = update_ets_op_id({LogId, Bucket, DCID}, NewBucketOp, ClockTable),
@@ -981,7 +981,7 @@ filter_terms_for_key(
     #log_record{log_operation = LogOperation} = log_utilities:check_log_record_version(LogRecord),
     #log_operation{tx_id = TxId, op_type = OpType, log_payload = OpPayload} = LogOperation,
     case OpType of
-        update ->
+        OpType when (OpType == update) orelse (OpType == update_start) ->
             handle_update(
                 TxId, OpPayload, T, Key, MinSnapshotTime, MaxSnapshotTime, Ops, CommittedOpsDict
             );

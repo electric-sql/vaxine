@@ -22,6 +22,7 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+-spec register() -> ok.
 register() ->
     gen_server:call(?MODULE, {register}).
 

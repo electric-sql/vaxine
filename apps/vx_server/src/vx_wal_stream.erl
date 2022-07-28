@@ -1,7 +1,11 @@
+%%------------------------------------------------------------------------------
 %% @doc Module that encapsulates logic for WAL replication.
 %% Current known limitations for this module:
-%% - no support for starting replication from arbitrary position
 %% - no streaming support for replication of multiple partitions
+%% - we may have a race condition when we try to materialize the value that
+%%   have not been updated in materializer yet but have been persisted in the
+%%   wal Stable snapshot notification service would be able to fix this problem
+%%------------------------------------------------------------------------------
 
 -module(vx_wal_stream).
 -behaviour(gen_statem).
@@ -9,7 +13,7 @@
 -export([ start_link/1,
           start_replication/3,
           stop_replication/1,
-          notify_commit/2
+          notify_commit/5
         ]).
 
 -export([ init/1,
@@ -20,12 +24,15 @@
           code_change/4
         ]).
 
+%% Extracted from:
 %% -include_lib("kernel/src/disk_log.hrl").
--record(continuation,         %% Chunk continuation.
+-record(continuation,
         {pid = self() :: pid(),
-         pos          :: non_neg_integer() | {integer(), non_neg_integer()},
+         %% We only know how to handle halt logs here, so silent dialyzer
+         pos          :: non_neg_integer(), %% | {integer(), non_neg_integer()},
          b            :: binary() | [] | pos_integer()
         }).
+
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -include_lib("antidote/include/antidote.hrl").
@@ -33,6 +40,23 @@
 
 -define(POLL_RETRY_MIN, 10).
 -define(POLL_RETRY_MAX, timer:seconds(10)).
+-define(HEADERSZ, 8).
+
+-record(wal_trans,
+        { txid :: antidote:txid(),
+          %% dcid is not determined for aborted transactions
+          dcid :: antidote:dcid() | undefined,
+          %% Wal offset, that points to first transaction record that
+          %% contains update_start.
+          start_offset :: file_offset(),
+          %% Wal offset, that points to position before commit record
+          end_offset :: file_offset(),
+          %% Snapshot here is snapshot of transaction updated with
+          %% commit timestamp of the transaction
+          snapshot = none :: antidote:snapshot_time() | none,
+          %% Materialized is left with none for aborted transactions
+          materialized = none :: list() | none
+        }).
 
 -record(data, {client :: pid() | undefined,
                mon_ref:: reference() | undefined,
@@ -47,11 +71,18 @@
                %% Last txid we have been notified about
                last_notif_txid :: antidote:txid() | undefined,
 
+               %% Start offset position, based on not-send transactions
+               left_offset_border = [] ::
+                 orddict:orddict(non_neg_integer(), txid()),
+               %% Commit offset position, based on last send transaction
+               right_offset_border = 0 :: non_neg_integer(),
+
                %% Retry for file polling
                file_poll_tref :: reference() | undefined,
                file_poll_backoff :: backoff:backoff(),
                partition :: antidote:partition_id(),
 
+               opts_raw_values = false :: boolean(),
                %% Buffer with materialized transasction that have not
                %% been sent
                to_send = [],
@@ -61,10 +92,26 @@
                port :: port() | undefined
               }).
 
+-type log_position() :: {non_neg_integer(), Buffer :: term()}.
+-type file_offset() :: non_neg_integer().
+-type wal_offset() :: {file_offset(), file_offset()}.
+
+-type txns_noncomitted_map() :: #{antidote:txid() =>
+                                      { file_offset(), [any_log_payload()]}
+                                 }.
+-type txns_comitted() :: [ { antidote:txid(),
+                             antidote:dcid(),
+                             antidote:clock_time(),
+                             file_offset(),
+                             term() } ].
+-type state() :: #data{}.
+
 -record(commit, { partition :: antidote:partition_id(),
                   txid :: antidote:txid(),
                   snapshot :: snapshot_time()
                 }).
+
+-export_type([wal_offset/0]).
 
 -spec start_link(list()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(Args) ->
@@ -72,15 +119,14 @@ start_link(Args) ->
 
 %% @doc Starts replication, Port is expected to be a tcp port, opened by
 %% vx_wal_tcp_worker.
--spec start_replication(pid(), port(), list()) ->
+-spec start_replication(pid(), port(), [{offset, 0 | eof | wal_offset()} |
+                                        {raw_values, true | false}
+                                       ]) ->
           {ok, pid()} | {error, term()}.
-start_replication(Pid, Port, _DiskLogPos) ->
-    gen_statem:call(Pid, {start_replication, Port}, infinity).
+start_replication(Pid, Port, RepOpts) ->
+    gen_statem:call(Pid, {start_replication, Port, RepOpts}, infinity).
 
-%% @doc Ask vx_wal_stream to stop replicating of the data. At the moment it's not
-%% possible to pause and resume replication. Process does not expect any further
-%% calls after call ( the only thing could be done here to terminate the process
-%% ).
+%% @doc Ask vx_wal_stream to stop replicating of the data.
 -spec stop_replication(pid()) -> ok | {error, term()}.
 stop_replication(Pid) ->
     gen_statem:call(Pid, {stop_replication}).
@@ -88,10 +134,14 @@ stop_replication(Pid) ->
 %% @doc Callback for notification of vx_wal_stream about committed transactions.
 %% Current logic would only notify the process with cast message if the status
 %% is set to ready.
--spec notify_commit(term(), pid()) -> ok.
-notify_commit({commit, Partition, TxId, CommitTime, SnapshotTime} = V, Pid) ->
+-spec notify_commit(pid(), antidote:partition_id(), antidote:txid(),
+                    antidote:clock_time(), antidote:snapshot_time()
+                   ) ->
+          ok.
+notify_commit(Pid, Partition, TxId, CommitTime, SnapshotTime) ->
     try
-        logger:info("commit notification ~p~n~p~n", [TxId, V]),
+        logger:info("commit notification ~p~n~p~n",
+                    [TxId, [Partition, TxId, CommitTime, SnapshotTime]]),
         true = ets:update_element(wal_replication_status, {Partition, Pid},
                            { #wal_replication_status.txdata,
                              {TxId, CommitTime, SnapshotTime}
@@ -113,8 +163,8 @@ notify_commit({commit, Partition, TxId, CommitTime, SnapshotTime} = V, Pid) ->
                              },
                 ok
         end
-    catch T:E:_ ->
-            logger:error("Notification failed ~p~n", [{T, E}]),
+    catch T:E:S ->
+            logger:error("Notification failed ~p:~p stack: ~p~n", [T, E, S]),
             ok
     end.
 
@@ -138,9 +188,9 @@ callback_mode() ->
 init(_Args) ->
     %% FIXME: Only work with a single partition at the moment
     %% FIXME: Move this initialization back to start_replication
-    [Partition | _] = dc_utilities:get_all_partitions(),
+    [Partition] = dc_utilities:get_all_partitions(),
     %% We would like to know where the file is located
-    InfoList = disk_log:info(log_path(Partition)),
+    InfoList = [_|_] = disk_log:info(log_path(Partition)),
     LogFile = proplists:get_value(file, InfoList),
     halt    = proplists:get_value(type, InfoList), %% Only handle halt type of the logs
 
@@ -154,7 +204,7 @@ init(_Args) ->
 
     ok = vx_wal_stream_server:register(),
     {ok, init_stream, #data{file_name = LogFile,
-                            txns_buffer = dict:new(),
+                            txns_buffer = #{},
                             partition = Partition,
                             file_poll_backoff = FilePollBackoff1,
                             port_retry_backoff = PortSendBackoff1,
@@ -162,15 +212,23 @@ init(_Args) ->
                            }}.
 
 %% Copied from logging_vnode and simplified for our case
+-spec log_path(antidote:partition_id()) -> file:filename().
 log_path(Partition) ->
     LogFile = integer_to_list(Partition),
     {ok, DataDir} = application:get_env(antidote, data_dir),
     LogId = LogFile ++ "--" ++ LogFile,
     filename:join(DataDir, LogId).
 
-init_stream({call, {Sender, _} = F}, {start_replication, Port}, Data) ->
+init_stream({call, {Sender, _} = F}, {start_replication, Port, Opts}, Data) ->
     %% FIXME: We support only single partition for now
-    {ok, FD} = open_log(Data#data.file_name),
+    {LWalOffset0, RWalOffset0} =
+        case proplists:get_value(offset, Opts, none) of
+            0    -> {0, 0};
+            none -> {0, 0};
+            eof  -> {eof, 0};
+            {LOffset, ROffset} -> {LOffset, ROffset}
+        end,
+    {ok, FD, FileCurOffset} = open_log(Data#data.file_name, LWalOffset0),
     MonRef = erlang:monitor(process, Sender),
 
     true = init_notification_slot(Data#data.partition),
@@ -180,15 +238,27 @@ init_stream({call, {Sender, _} = F}, {start_replication, Port}, Data) ->
 
     {next_state, await_data, Data#data{client = Sender,
                                        mon_ref = MonRef,
+                                       file_pos = FileCurOffset,
+                                       file_buff = [],
                                        file_desc = FD,
                                        file_poll_backoff = Backoff,
-                                       port = Port
+                                       right_offset_border = RWalOffset0,
+                                       port = Port,
+                                       opts_raw_values
+                                           = proplists:get_bool(raw_values, Opts)
                                       },
      [{state_timeout, 0, {timeout, undefined, file_poll_retry} },
       {reply, F, {ok, self()}}]};
 
 init_stream(info, {gen_event_EXIT, _Handler, _Reason}, Data) ->
-    {keep_state, Data}.
+    {keep_state, Data};
+
+init_stream(info, {inet_reply, _Sock, ok}, _Data) ->
+    keep_state_and_data;
+
+init_stream(info, {inet_reply, _Sock, {error, Reason}}, Data) ->
+    logger:error("socket error: ~p~n", [Reason]),
+    {stop, {shutdown, Reason}, Data}.
 
 await_data(_, #commit{txid = TxId}, #data{file_poll_tref = undefined} = Data) ->
     continue_wal_reading(Data#data{last_notif_txid = TxId});
@@ -220,7 +290,7 @@ await_data({call, Sender}, {stop_replication}, Data) ->
         end,
     {next_state, init_stream, #data{file_name = Data#data.file_name,
                                     file_status = more_data,
-                                    txns_buffer = dict:new(),
+                                    txns_buffer = #{},
                                     partition = Data#data.partition,
                                     file_poll_backoff = FBackoff,
                                     port_retry_backoff = PBackoff
@@ -229,27 +299,25 @@ await_data({call, Sender}, {stop_replication}, Data) ->
     };
 
 await_data({call, Sender}, Msg, Data) ->
-    %% FIXME: handle {stop_replication} message here
     logger:info("Ignored message: ~p~n", [Msg]),
     {keep_state, Data, [{reply, Sender, {error, unhandled_msg}}] };
 
-await_data(info, {gen_event_EXIT, _Handler, _Reason}, _Data) ->
-    %% FIXME: probably safer just to restart the process
-    ok = logging_notification_server:add_handler(
-           ?MODULE, notify_commit, [self()]),
-    keep_state_and_data;
+await_data(info, {gen_event_EXIT, _Handler, _Reason}, Data) ->
+    logger:error("Logging notification server terminated accidently, stopping"),
+    {stop, {shutdown, {logging_notification_server, terminated}}, Data};
 
 %% We receive inet_reply messages due to port_command/3 nosuspend
 %% call in vx_wal_tcp_worker:send/2
-await_data(info, {inet_reply, _Sock, ok}, _Data) ->
-    keep_state_and_data;
-
-await_data(info, {inet_reply, _Sock, {error, Reason}}, Data) ->
-    logger:error("socket error: ~p~n", [Reason]),
-    {stop, {shutdown, Reason}, Data};
+await_data(info, {inet_reply, _Sock, Reason}, Data) ->
+    case Reason of
+        ok ->
+            keep_state_and_data;
+        {error, EReason} ->
+            logger:error("socket error: ~p~n", [EReason]),
+            {stop, {shutdown, Reason}, Data}
+    end;
 
 await_data(_, Msg, _Data) ->
-    %% FIXME: handle {stop_replication} message here
     logger:info("Ignored message wal streamer: ~p~n", [Msg]),
     keep_state_and_data.
 
@@ -309,25 +377,27 @@ fetch_latest_position(Partition) ->
     ets:lookup_element(wal_replication_status,
                        {Partition, self()}, #wal_replication_status.txdata).
 
-materialize(Key, Type, ST, TxId) ->
-    {Partition, _} = log_utilities:get_key_partition(Key),
-    %% FIXME: Yeah, we do not expect this to fail for now
-    {ok, Snapshot} =
-        materializer_vnode:read(
-          Key, Type, ST, TxId, _PropertyList = [], Partition),
-    Snapshot.
-
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
 
 terminate(_Reason, _SN, _SD) ->
     ok.
 
-%% only initial position is supported at the moment.
-open_log(LogFile) ->
+-spec open_log(file:filename_all(), integer() | eof) ->
+          {ok, file:fd(), pos_integer() }.
+open_log(LogFile, WalPos) ->
     {ok, FD} = file:open(LogFile, [raw, binary, read]),
-    {ok, _Head} = file:read(FD, _Header = 8),
-    {ok, FD}.
+    case WalPos of
+        0 ->
+            {ok, _Head} = file:read(FD, ?HEADERSZ),
+            {ok, FD, 0};
+        eof ->
+            {ok, NPos} = file:position(FD, eof),
+            {ok, FD, NPos - ?HEADERSZ};
+        WalPos when is_integer(WalPos) ->
+            {ok, NPos} = file:position(FD, WalPos),
+            {ok, FD, NPos}
+    end.
 
 read_ops_from_log(Data) ->
     case read_ops_from_log(Data, 0) of
@@ -341,64 +411,69 @@ read_ops_from_log(Data) ->
             Error
     end.
 
-read_ops_from_log(#data{txns_buffer = TxnBuff,
+read_ops_from_log(#data{txns_buffer = TxNotComitted0,
                         file_pos = FPos,
                         file_buff = FBuff,
                         file_desc = Fd
                        } = Data, N) ->
-    case read_ops_from_log(Fd, Data#data.file_name, FPos, FBuff, TxnBuff) of
+    case read_ops_from_log(Fd, Data#data.file_name, FPos, FBuff) of
         %% IF we received eof here, that means we haven't read anything from the
         %% log during this call
-        {eof, LogPosition, {NonComittedMap, []}} ->
-            %% FIXME: What is the position here?
+        {eof, LogPosition, []} ->
             {FPos1, FBuff1} = LogPosition,
-            {ok, N, Data#data{txns_buffer = NonComittedMap,
-                              file_pos = FPos1,
+            {ok, N, Data#data{file_pos = FPos1,
                               file_buff = FBuff1,
                               file_status = eof
                              }};
         {error, _} = Error ->
             Error;
-        {ok, LogPosition, {NonComittedMap, ComittedData}} ->
-            {FPos1, FBuff1} = LogPosition,
-            case
-                notify_client(ComittedData, Data#data{file_pos = FPos1,
-                                                      file_buff = FBuff1,
-                                                      txns_buffer = NonComittedMap,
-                                                      file_status = more_data
-                                                     })
-            of
-                {ok, Data1} ->
-                    read_ops_from_log(Data1, N+1);
-                {retry, Data1} ->
-                    {ok, N + 1, Data1};
+        {ok, {FPos1, FBuff1}, NewTerms} ->
+            %% Calculate position before next chunk was obtained
+            TxOffset = generate_pos_in_log({FPos, FBuff}),
+            logger:debug("~p offset reported: ~p~n", [self(), TxOffset]),
+
+            {ok, ComittedData, Data1} =
+                process_txns(NewTerms, TxNotComitted0, [], TxOffset,
+                             Data#data{file_pos = FPos1, file_buff = FBuff1,
+                                       file_status = more_data
+                                       }
+                            ),
+            case notify_client(ComittedData, Data1) of
+                {ok, Data2} ->
+                    read_ops_from_log(Data2, N+1);
+                {retry, Data2} ->
+                    {ok, N + 1, Data2};
                 {error, _} = Error ->
                     Error
             end
     end.
 
--type txns_noncomitted_map() :: dict:dict(antidote:txid(), [any_log_payload()]).
--type txns_comitted()   :: [ { antidote:txid(), term() } ].
-
--spec read_ops_from_log(file:fd(), file:filename_all(), non_neg_integer(), term(),
-                        txns_noncomitted_map()) ->
+-spec read_ops_from_log(file:fd(), file:filename_all(), non_neg_integer(), term()) ->
           {error, term()} |
-          {ok | eof, log_position(),
-           { txns_noncomitted_map(), txns_comitted() }
-          }.
-read_ops_from_log(Fd, FileName, FPos, FBuffer, RemainingOps) ->
-    case read_chunk(Fd, FileName, FPos, FBuffer, 100) of
+          {ok | eof, log_position(), [term()]}.
+read_ops_from_log(Fd, FileName, FPos, FBuffer) ->
+    case read_chunk(Fd, FileName, FPos, FBuffer, 1) of
         {eof, LogPosition, []} ->
-            {eof, LogPosition, {RemainingOps, []}};
+            {eof, LogPosition, []};
         {error, _} = Error ->
             Error;
         {ok, LogPosition, NewTerms}->
-            {ok, LogPosition, process_txns(NewTerms, RemainingOps, [])}
+            {ok, LogPosition, NewTerms}
     end.
 
--type log_position() :: {non_neg_integer(), Buffer :: term()}.
+%% If we have emitted new terms -> we can consider offset to be Pos - size(Binary) - headersz
+%% If we have not emitted new terms -> we do not update offset, as we expect that the
+%% chunk was larger then the MAX_CHUNK_SIXE in disk_log
+%% If eof we simple retry with the buffe and last settings
+generate_pos_in_log({FPos, FBuf}) ->
+    case FBuf of
+        [] -> FPos;
+        B  ->
+            FPos - byte_size(B)
+    end.
+
 -spec read_chunk(file:fd(), file:filename_all(), non_neg_integer(), term(), non_neg_integer()) ->
-          {ok, log_position(), [ term() ]} |
+          {ok, log_position(), [ {term(), #log_record{}} ]} |
           {error, term()} |
           {eof, log_position(), [ term() ]}.
 read_chunk(Fd, FileName, FPos, FBuff, Amount) ->
@@ -412,6 +487,9 @@ read_chunk(Fd, FileName, FPos, FBuff, Amount) ->
             {ok, {FPos1, Buffer1}, Terms};
         {#continuation{pos = FPos1, b = Buffer1}, Terms} ->
             {ok, {FPos1, Buffer1}, Terms};
+        {#continuation{}, [], _BadBytes} = R ->
+            logger:error("Bad bytes: ~p~n", [R]),
+            {error, badbytes};
         {error, _} = Error ->
             Error;
         eof ->
@@ -419,102 +497,201 @@ read_chunk(Fd, FileName, FPos, FBuff, Amount) ->
             {eof, {FPos, FBuff}, []}
     end.
 
-process_txns([], RemainingOps, FinalizedTxns) ->
-    {RemainingOps, preprocess_comitted(lists:reverse(FinalizedTxns))};
-process_txns([{_, LogRecord} | Rest], RemainingOps, FinalizedTxns0) ->
-    #log_record{log_operation = LogOperation} = log_utilities:check_log_record_version(LogRecord),
+-spec process_txns([{term(), #log_record{}}], txns_noncomitted_map(), txns_comitted(),
+                   file_offset(), state()) ->
+          {ok, txns_comitted(), state()}.
+process_txns([], TxnsNonComitted, FinalizedTxns, _, Data) ->
+    {ok, preprocess_comitted(FinalizedTxns),
+     Data#data{ txns_buffer = TxnsNonComitted }};
+process_txns([{_, LogRecord} | Rest], TxnsNonComitted0, FinalizedTxns0, TxOffset, Data) ->
+    #log_record{log_operation = LogOperation} =
+        log_utilities:check_log_record_version(LogRecord),
 
-    {RemainingOps1, FinalizedTxns1} =
-        process_op(LogOperation, RemainingOps, FinalizedTxns0),
-    process_txns(Rest, RemainingOps1, FinalizedTxns1).
+    {TxnsNonComitted1, FinalizedTxns1, Data1} =
+        process_op0(LogOperation, TxnsNonComitted0, FinalizedTxns0, TxOffset, Data),
+    process_txns(Rest, TxnsNonComitted1, FinalizedTxns1, TxOffset, Data1).
 
-process_op(#log_operation{op_type = update, tx_id = TxId, log_payload = Payload},
-           RemainingOps, FinalizedTxns) ->
+process_op0(#log_operation{op_type = OpType, tx_id = TxId, log_payload = Payload},
+           RemainingOps, FinalizedTxns, TxOffset, Data)
+  when OpType == update_start ->
     {Key, Type, Op} = { Payload#update_log_payload.key,
                         Payload#update_log_payload.type,
                         Payload#update_log_payload.op
-                  },
-    {dict:append(TxId, {Key, Type, Op}, RemainingOps), FinalizedTxns};
-process_op(#log_operation{op_type = prepare}, RemainingOps, FinalizedTxns) ->
-    {RemainingOps, FinalizedTxns};
-process_op(#log_operation{op_type = abort, tx_id = TxId}, RemainingOps, FinalizedTxns) ->
-     case dict:take(TxId, RemainingOps) of
-        {_, RemainingOps1} ->
-             %% NOTE: We still want to know about this transaction to not loose
-             %% track of last transaction id.
-            {RemainingOps1,
-             [prepare_txn_operations(TxId, aborted) |FinalizedTxns]};
+                      },
+    RemainingOps1 = RemainingOps#{ TxId => {TxOffset, [{Key, Type, Op}]} },
+    %% Record the starting offset of the new transaction
+    Data1 = add_left_border(TxOffset, TxId, Data),
+    {RemainingOps1, FinalizedTxns, Data1};
+process_op0(LogOp = #log_operation{tx_id = TxId}, RemainingOps, FinalizedTxns, TxOffset, Data) ->
+    case RemainingOps of
+        #{ TxId := _ } ->
+            process_op1(LogOp, RemainingOps, FinalizedTxns, TxOffset, Data);
+        _ ->
+            {RemainingOps, FinalizedTxns, Data}
+    end.
+
+process_op1(#log_operation{op_type = OpType, tx_id = TxId, log_payload = Payload},
+           RemainingOps, FinalizedTxns, _TxOffset, Data)
+  when OpType == update ->
+    {Key, Type, Op} = { Payload#update_log_payload.key,
+                        Payload#update_log_payload.type,
+                        Payload#update_log_payload.op
+                      },
+    RemainingOps1 =
+                maps:update_with(TxId, fun({Offset, Ops}) ->
+                                               {Offset, [{Key, Type, Op} | Ops]}
+                                       end, RemainingOps),
+    {RemainingOps1, FinalizedTxns, Data};
+process_op1(#log_operation{op_type = prepare}, RemainingOps, FinalizedTxns, _TxPrepareOffset, Data) ->
+    {RemainingOps, FinalizedTxns, Data};
+process_op1(#log_operation{op_type = abort, tx_id = TxId}, RemainingOps, FinalizedTxns, TxAbortOffset, Data) ->
+    case maps:take(TxId, RemainingOps) of
+        {{TxStartOffset, _}, RemainingOps1} ->
+            { RemainingOps1,
+              [prepare_txn_aborted(TxId, TxStartOffset, TxAbortOffset) | FinalizedTxns],
+              Data
+            };
         error ->
-            logger:warning("Empty transaction: ~p~n", [TxId]),
-            {RemainingOps, FinalizedTxns}
+            {RemainingOps, FinalizedTxns, Data}
     end;
-process_op(#log_operation{op_type = commit, tx_id = TxId, log_payload = Payload},
-           RemainingOps, FinalizedTxns) ->
+process_op1(#log_operation{op_type = commit, tx_id = TxId, log_payload = Payload},
+           RemainingOps, FinalizedTxns, TxCommitOffset, Data) ->
     #commit_log_payload{commit_time = {DcId, TxCommitTime},
                         snapshot_time = ST
                        } = Payload,
     TxST = vectorclock:set(DcId, TxCommitTime, ST),
 
-    case dict:take(TxId, RemainingOps) of
-        {TxOpsList, RemainingOps1} ->
+    case maps:take(TxId, RemainingOps) of
+        {{TxStartOffset, TxOpsList}, RemainingOps1} ->
+            %% Sort TxOpsList according to file order
             {RemainingOps1,
-             [prepare_txn_operations(TxId, TxST, TxOpsList)
-             | FinalizedTxns]};
+             [prepare_txn_comitted(TxId, TxST, DcId,
+                                   TxStartOffset, TxCommitOffset,
+                                   lists:reverse(TxOpsList))
+             | FinalizedTxns],
+             Data
+            };
         error ->
             logger:warning("Empty transaction: ~p~n", [TxId]),
-            {RemainingOps, FinalizedTxns}
+            {RemainingOps, FinalizedTxns, Data}
     end.
 
-prepare_txn_operations(TxId, ST, TxOpsList0) ->
-    TxOpsDict =   lists:foldl(fun({Key, Type, Op}, Acc) ->
-                                  dict:append({Key, Type}, Op, Acc)
-                              end, dict:new(), TxOpsList0),
-    TxKeys = sets:to_list(sets:from_list(lists:map(fun({Key, Type, _Op}) -> {Key, Type} end, TxOpsList0))),
-    TxMaterializedKeysWithOps =
-        lists:map(fun({Key, Type}) ->
-                          {Key, Type, materialize(Key, Type, ST, TxId), dict:fetch({Key, Type}, TxOpsDict)}
-                  end, TxKeys),
-    logger:info("processed txn:~n ~p ~p~n", [TxId, TxMaterializedKeysWithOps]),
-    {TxId, TxMaterializedKeysWithOps}.
+prepare_txn_comitted(TxId, TxST, DcId, TxStartOffset, TxCommitOffset, TxOpsList0) ->
+    logger:info("processed txn:~n ~p ~p:~p ~p~n",
+                [TxId, TxStartOffset, TxCommitOffset, TxOpsList0]),
 
-prepare_txn_operations(TxId, aborted) ->
-    {TxId, aborted}.
+    #wal_trans{ txid = TxId,
+                dcid = DcId,
+                snapshot = TxST,
+                end_offset = TxCommitOffset,
+                start_offset = TxStartOffset,
+                materialized = TxOpsList0
+              }.
+
+prepare_txn_aborted(TxId, TxStartOffset, TxAbortOffset) ->
+    #wal_trans{ txid = TxId,
+                end_offset = TxAbortOffset,
+                start_offset = TxStartOffset
+              }.
 
 preprocess_comitted(L) ->
-    L.
+    lists:reverse(L).
 
-notify_client([], Data) ->
-    {ok, Data};
-notify_client(FinalyzedTxns, #data{port = Port} = Data) ->
-    case notify_client0(FinalyzedTxns, undefined, Port) of
-        {ok, LastTxId} ->
-            {ok, Data#data{last_read_txid = LastTxId,
+notify_client(FinalyzedTxns, Data = #data{port = Port,
+                                          right_offset_border = RB,
+                                          last_notif_txid = LastSendTx,
+                                          left_offset_border = LB,
+                                          opts_raw_values = RawValuesB
+                                         }) ->
+    case notify_client0(FinalyzedTxns, LastSendTx, Port, LB, RB, RawValuesB) of
+        {ok, LastTxId, LB1, RB1} ->
+            {ok, Data#data{last_notif_txid = LastTxId,
+                           left_offset_border = LB1,
+                           right_offset_border = RB1,
                            to_send = []
                           }};
-        {retry, NotSendTxns} ->
-            {retry, set_port_send_timer(Data#data{to_send = NotSendTxns})};
+        {retry, NotSendTxns, LastTxId, LB1, RB1} ->
+            {retry, set_port_send_timer(
+                      Data#data{to_send = NotSendTxns,
+                                last_notif_txid = LastTxId,
+                                left_offset_border = LB1,
+                                right_offset_border = RB1
+                               })};
         {error, Reason} ->
             {error, Reason}
     end.
 
-notify_client0(D = [{TxId, TxOpsList} | FinalyzedTxns], _LastTxn, Port)
- when is_list(TxOpsList)->
-    case
-        vx_wal_tcp_worker:send(Port, TxId, TxOpsList)
-    of
+notify_client0([#wal_trans{materialized = none} | FinalyzedTxns],
+               LastSentTx, Port, LB, RB, RawValuesB) ->
+    notify_client0(FinalyzedTxns, LastSentTx, Port, LB, RB, RawValuesB);
+notify_client0([#wal_trans{txid = TxId, end_offset = EOffset} | FinalyzedTxns],
+               LastSentTx, Port, LB, RB, RawValuesB)
+  when EOffset < RB ->
+    logger:debug("skip transaction with commit offset: ~p~n", [EOffset]),
+    notify_client0(FinalyzedTxns, LastSentTx, Port,
+                   remove_left_border(TxId, LB), RB, RawValuesB);
+notify_client0([#wal_trans{txid = TxId, dcid = DcId, snapshot = TxST,
+                           materialized = TxOpsList,
+                           start_offset = _SOffset,
+                           end_offset = EOffset
+                          } | FinalyzedTxns] = Txns, LastTxn, Port, LB, RightOffset,
+               RawValuesB
+              ) ->
+    LeftOffset = case LB of
+                     [] -> 0;
+                     [{LeftOff, _} | _] -> LeftOff
+                 end,
+    TxOffset = {LeftOffset, EOffset},
+    TxOpsMaterialized = materialize_keys(RawValuesB, TxId, TxST, TxOpsList),
+    %% Offset that is included with each transaction is calculated according to the following
+    %% principal:
+    %% - left border points to the position of update_start operation for oldest transasction
+    %%   in the log, that has not been send to the client (including this exact trans)
+    %% - right border points to the position of commit operation, for most recent transaction
+    %%   that has not been send to the client (including this exact trans)
+    case vx_wal_tcp_worker:send(Port, DcId, TxId, TxOffset, TxOpsMaterialized) of
         false ->
             %% We need to retry later, port is busy
-            {retry, D};
+            {retry, Txns, LastTxn, LB, RightOffset};
         true ->
-            notify_client0(FinalyzedTxns, TxId, Port);
+            notify_client0(FinalyzedTxns, TxId, Port,
+                           remove_left_border(TxId, LB), EOffset, RawValuesB);
         {error, Reason} ->
             {error, Reason}
     end;
-notify_client0([{TxId, aborted} | FinalyzedTxns], _LastTxn, Port) ->
-    notify_client0(FinalyzedTxns, TxId, Port);
-notify_client0([], LastTxn, _) ->
-    {ok, LastTxn}.
+notify_client0([], LastTxn, _, LB, RB, _) ->
+    {ok, LastTxn, LB, RB}.
 
--ifdef(TEST).
+add_left_border(TxOffset, TxId, Data = #data{left_offset_border = OrdDict}) ->
+    Data#data{ left_offset_border = orddict:store(TxOffset, TxId, OrdDict) }.
 
--endif.
+remove_left_border(TxId, OrdDict) ->
+    lists:keydelete(TxId, 2, OrdDict).
+
+materialize_keys(_, _, _, []) -> [];
+materialize_keys(_RawValuesB = true, _, _, List) -> List;
+materialize_keys(_RawValuesB = false, TxId, TxST, TxOpsList0) ->
+    TxOpsDict = lists:foldl(fun({Key, Type, Op}, Acc) ->
+                                    dict:append({Key, Type}, Op, Acc)
+                            end, dict:new(), TxOpsList0),
+    TxKeys = sets:to_list(
+               sets:from_list(
+                 lists:map(fun({Key, Type, _Op}) -> {Key, Type} end, TxOpsList0))),
+    lists:map(fun({Key, Type}) ->
+                      {Key, Type, materialize(Key, Type, TxST, TxId),
+                       dict:fetch({Key, Type}, TxOpsDict)
+                      }
+              end, TxKeys).
+
+materialize(Key, Type, ST, TxId) ->
+    {Partition, _} = log_utilities:get_key_partition(Key),
+    %% FIXME: Yeah, we do not expect this to fail for now. Technically
+    %% we might get here when transaction has been persisted, but
+    %% materializer have not bee updated.
+    %% First we need to detect it somehow with materializer_vnode API.
+    %% Second if materialization is not possible we need to wait for
+    %% snapshot to stabilize.
+    {ok, Snapshot} =
+        materializer_vnode:read(
+          Key, Type, ST, TxId, _PropertyList = [], Partition),
+    Snapshot.

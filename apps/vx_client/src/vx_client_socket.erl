@@ -1,9 +1,11 @@
 -module(vx_client_socket).
 -behaviour(gen_server).
 
--export([start_link/2, start_link/3,
-         disconnect/1, subscribe/4, unsubscribe/2,
-         stop/1]).
+-export([start_link/2,
+         start_link/3,
+         disconnect/1,
+         stop/1
+        ]).
 
 -export([start_replication/2,
          get_next_stream_bulk/2,
@@ -20,7 +22,6 @@
 -include("vx_proto.hrl").
 
 -type address() :: inet:socket_address() | inet:hostname().
--type sub_id() :: vx_client:sub_id().
 
 -record(state, { address :: address(),
                  port :: inet:port_number(),
@@ -52,25 +53,20 @@ start_link(Address, Port, Options) when is_list(Options) ->
 disconnect(_Pid) ->
     {error, not_implemented}.
 
--spec subscribe(pid(), [binary()], term(), boolean()) ->
-          {ok, sub_id()} | {error, term()}.
-subscribe(_Pid, _Keys, _Snapshot, _SnapshotFlag) ->
-    {error, not_implemented}.
-
--spec unsubscribe(pid(), sub_id()) -> ok | {error, term()}.
-unsubscribe(_Pid, _SubId) ->
-    {error, not_implemented}.
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
     call_infinity(Pid, stop).
 
-%% @doc Starts replication from the server from the beginning position in the
+%% @doc Starts replication using existing connection from the specifyed position in the
 %% log. When `require_ack` options is provided the socket would expect periodic
 %% confirmations that N amount of events have been processed before sending more
 %% messages to the client. This is the simple measure to protect the client code
 %% from overloading.
--spec start_replication(pid(), [require_ack]) -> ok | {error, term()}.
+-spec start_replication(pid(), [require_ack
+                               | {offset, wal_offset() | 0 | eof}
+                               ]) ->
+          ok | {error, term()}.
 start_replication(Pid, Opts) ->
     call_request(Pid, {start_replication, Opts}).
 
@@ -133,7 +129,7 @@ handle_call(Msg, _, State) ->
     logger:warning("unhandled call msg: ~p~n", [Msg]),
     {reply, {error, not_implemented}, State}.
 
-handle_cast({get_next_bulk, N}, State) ->
+handle_cast({get_next_bulk, _N}, State) ->
     {noreply, State};
 handle_cast(Msg, State) ->
     logger:warning("unhandled cast msg: ~p~n", [Msg]),
@@ -207,6 +203,7 @@ handle_server_msg({error, Term}, State) ->
 
 handle_client_msg({start_replication, Opts}, CliRef, State) ->
     RequireAck = proplists:get_bool(require_ack, Opts),
+    Offset = proplists:get_value(offset, Opts, none),
     case RequireAck of
         true ->
             {reply, {error, {require_ack,is_not_supported}}, State};
@@ -214,7 +211,9 @@ handle_client_msg({start_replication, Opts}, CliRef, State) ->
             case State#state.wal_replication of
                 undefined ->
                     send_request(
-                      #vx_cli_req{msg = #vx_cli_start_req{}}, CliRef, State);
+                      #vx_cli_req{msg =
+                                      #vx_cli_start_req{opts = [{offset, Offset}]}
+                                 }, CliRef, State);
                 RepId ->
                     {reply, {error, {already_started, RepId}}, State}
             end
