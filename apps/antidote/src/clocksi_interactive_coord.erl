@@ -128,7 +128,7 @@ perform_singleitem_update(Clock, Key, Type, Params, Properties) ->
                     TxId = Transaction#transaction.txn_id,
                     LogRecord = #log_operation{
                         tx_id = TxId,
-                        op_type = update,
+                        op_type = update_start,
                         log_payload = #update_log_payload{
                             key = Key, type = Type, op = DownstreamRecord
                         }
@@ -913,12 +913,12 @@ perform_update(Op, UpdatedPartitions, Transaction, _Sender, ClientOps) ->
     {Key, Type, Update} = Op,
     Partition = log_utilities:get_key_partition(Key),
 
-    WriteSet =
+    {FirstOp, WriteSet} =
         case lists:keyfind(Partition, 1, UpdatedPartitions) of
             false ->
-                [];
+                {true, []};
             {Partition, WS} ->
-                WS
+                {false, WS}
         end,
 
     %% Execute pre_commit_hook if any
@@ -942,7 +942,8 @@ perform_update(Op, UpdatedPartitions, Transaction, _Sender, ClientOps) ->
                     {error, Reason};
                 {ok, DownstreamOp} ->
                     ok = async_log_propagation(
-                        Partition, Transaction#transaction.txn_id, Key, Type, DownstreamOp
+                           Partition, Transaction#transaction.txn_id, Key, Type, DownstreamOp,
+                           FirstOp
                     ),
 
                     %% Append to the write set of the updated partition
@@ -970,10 +971,10 @@ append_updated_partitions(UpdatedPartitions, WriteSet, Partition, Update) ->
     AllUpdates = {Partition, [Update | WriteSet]},
     lists:keyreplace(Partition, 1, UpdatedPartitions, AllUpdates).
 
--spec async_log_propagation(index_node(), txid(), key(), type(), effect()) -> ok.
-async_log_propagation(Partition, TxId, Key, Type, Record) ->
+-spec async_log_propagation(index_node(), txid(), key(), type(), effect(), boolean()) -> ok.
+async_log_propagation(Partition, TxId, Key, Type, Record, FirstOp) ->
     LogRecord = #log_operation{
-        op_type = update,
+        op_type = if FirstOp -> update_start; true -> update end,
         tx_id = TxId,
         log_payload = #update_log_payload{key = Key, type = Type, op = Record}
     },

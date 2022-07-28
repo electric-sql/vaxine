@@ -428,8 +428,9 @@ process_txns([{_, LogRecord} | Rest], RemainingOps, FinalizedTxns0) ->
         process_op(LogOperation, RemainingOps, FinalizedTxns0),
     process_txns(Rest, RemainingOps1, FinalizedTxns1).
 
-process_op(#log_operation{op_type = update, tx_id = TxId, log_payload = Payload},
-           RemainingOps, FinalizedTxns) ->
+process_op(#log_operation{op_type = OpType, tx_id = TxId, log_payload = Payload},
+           RemainingOps, FinalizedTxns) when OpType == update
+                                             orelse OpType == update_start ->
     {Key, Type, Op} = { Payload#update_log_payload.key,
                         Payload#update_log_payload.type,
                         Payload#update_log_payload.op
