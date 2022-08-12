@@ -276,23 +276,25 @@ an_disconnect(Pid) ->
     antidotec_pb_socket:stop(Pid).
 
 vx_connect() ->
-    vx_connect_int(0).
+  vx_connect_int(0).
 
 vx_connect(Node) ->
-    vx_connect_int(node_modifier(get_name(Node))).
+  vx_connect_int(node_modifier(get_name(Node))).
 
 vx_connect_int(N) ->
-    vx_client:connect("127.0.0.1",
+  vx_client:connect("127.0.0.1",
                                 vx_test_utils:port(vx_server, pb_port, N), []).
 
 vx_disconnect(C) ->
-    vx_client:stop(C).
+  vx_client:stop(C).
 
 with_connection(Node, Fun) ->
+    ct:log("connect vx_client connect~n"),
     {ok, C} = vx_connect(Node),
     try Fun(C)
     after
-        vx_disconnect(C)
+      ct:log("disconnect vx_client connect~n"),
+      vx_disconnect(C)
     end.
 
 with_replication(C, Opts, Fun) ->
@@ -314,7 +316,7 @@ with_connection(Fun) ->
     {ok, C} = vx_connect(),
     try Fun(C)
     after
-        vx_disconnect(C)
+      vx_disconnect(C)
     end.
 
 with_replication_con(Opts, Fun) ->
@@ -362,5 +364,6 @@ assert_count(N, Timeout, Fun) ->
             ct:log("received: ~p~n", [M]),
             [Fun(M) | assert_count(N-1, Timeout, Fun)]
     after Timeout ->
-              erlang:error({not_sufficient_msg_count, N})
+        ct:log("timeout~n"),
+        erlang:error({not_sufficient_msg_count, N})
     end.
