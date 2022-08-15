@@ -132,3 +132,6 @@ endif
 
 docker-stop:
 	docker stop ${CONTAINER_NAME}
+
+send-coverage:
+	${REBAR} as test coveralls send
