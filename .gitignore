@@ -18,3 +18,5 @@ _build
 rebar3.crashdump
 *~
 erlang_ls.config
+.tool-versions
+*.coverdata

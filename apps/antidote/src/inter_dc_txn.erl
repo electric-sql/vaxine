@@ -93,7 +93,12 @@ is_local(#interdc_txn{dcid = DCID}) -> DCID == dc_utilities:get_my_dc_id().
 -spec is_ping(interdc_txn()) -> boolean().
 is_ping(#interdc_txn{log_records = Ops}) -> Ops == [].
 
--spec ops_by_type(interdc_txn(), any()) -> [log_record()].
+-spec ops_by_type(interdc_txn(), update | perform | abort | commit) -> [log_record()].
+ops_by_type(#interdc_txn{log_records = Ops}, Type = update) ->
+    F = fun(Op) -> Type == Op#log_record.log_operation#log_operation.op_type orelse
+                       update_start == Op#log_record.log_operation#log_operation.op_type
+        end,
+    lists:filter(F, Ops);
 ops_by_type(#interdc_txn{log_records = Ops}, Type) ->
     F = fun(Op) -> Type == Op#log_record.log_operation#log_operation.op_type end,
     lists:filter(F, Ops).

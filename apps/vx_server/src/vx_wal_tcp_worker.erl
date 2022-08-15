@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 -export([ start_link/3,
-          send/3
+          send/5
         ]).
 -export([ init/1,
           handle_call/3,
@@ -13,20 +13,24 @@
         ]).
 
 -include_lib("vx_client/include/vx_proto.hrl").
--record(state, { socket :: port(),
+-record(state, { socket :: ranch_transport:socket(),
                  transport :: module(),
                  wal_stream :: pid() | undefined,
                  rep_id :: reference() | undefined
                }).
+-type state() :: #state{}.
 
 -spec start_link(ranch:ref(), module(), any()) -> {ok, ConnPid :: pid()}.
 start_link(Ref, Transport, ProtoOpts) ->
     Pid = proc_lib:spawn_link(?MODULE, init, [{Ref, Transport, ProtoOpts}]),
     {ok, Pid}.
 
--spec send(port(), term(), term()) -> boolean() | {error, term()}.
-send(Port, TxId, TxOpsList) ->
-    Msg = #vx_wal_txn{ txid = TxId, ops = TxOpsList },
+-spec send(port(), antidote:dcid() | undefined, antidote:txid(),
+           vx_wal_stream:wal_offset(), tx_ops()) ->
+          boolean() | {error, term()}.
+send(Port, DcId, TxId, Offset, TxOpsList) ->
+    Msg = #vx_wal_txn{ txid = TxId, dcid = DcId, wal_offset = Offset,
+                       ops = TxOpsList },
     Binary = term_to_binary(Msg),
     try
         erlang:port_command(Port, Binary, [nosuspend])
@@ -76,7 +80,11 @@ handle_info({tcp_error, _, Reason}, #state{socket = Socket,
                                           } = State) ->
     logger:error("Socket error: ~p", [Reason]),
     Transport:close(Socket),
-    ok = vx_wal_stream:stop_replication(Pid),
+    _ = case Pid of
+            undefined -> ok;
+            _ ->
+                vx_wal_stream:stop_replication(Pid)
+    end,
     {stop, {error, Reason}, State};
 handle_info({tcp_closed, _}, State) ->
     {stop, normal, State};
@@ -100,13 +108,13 @@ terminate(_, _) ->
 handle_vx_wal_protocol(BinaryReq, _State) ->
     {ok, binary_to_term(BinaryReq)}.
 
--spec handle_request(term(), term()) ->
-          {noreply, term(), term()} | {error, term()}.
+-spec handle_request(term(), state()) ->
+          {noreply, term(), state()} | {error, term()}.
 handle_request(#vx_cli_req{ref = Ref,
-                           msg = #vx_cli_start_req{}
+                           msg = #vx_cli_start_req{opts = Opts}
                           }, State) ->
     {ok, Pid} = vx_wal_stream:start_link([]),
-    case vx_wal_stream:start_replication(Pid, State#state.socket, []) of
+    case vx_wal_stream:start_replication(Pid, State#state.socket, Opts) of
         {ok, _} ->
             RepId = make_ref(),
             {noreply, #vx_srv_res{ref = Ref, msg = #vx_srv_start_res{rep_id = RepId}},
