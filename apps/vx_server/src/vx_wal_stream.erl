@@ -11,7 +11,7 @@
 -behaviour(gen_statem).
 
 -export([ start_link/1,
-          start_replication/3,
+          start_replication/4,
           stop_replication/1,
           notify_commit/5
         ]).
@@ -119,12 +119,13 @@ start_link(Args) ->
 
 %% @doc Starts replication, Port is expected to be a tcp port, opened by
 %% vx_wal_tcp_worker.
--spec start_replication(pid(), port(), [{offset, 0 | eof | wal_offset()} |
-                                        {raw_values, true | false}
-                                       ]) ->
-          {ok, pid()} | {error, term()}.
-start_replication(Pid, Port, RepOpts) ->
-    gen_statem:call(Pid, {start_replication, Port, RepOpts}, infinity).
+-spec start_replication(pid(), reference(), port(),
+                        [{offset, 0 | eof | wal_offset()} |
+                         {raw_values, true | false}
+                        ]) ->
+          {ok, reference()} | {error, term()}.
+start_replication(Pid, ReqRef, Port, RepOpts) ->
+    gen_statem:call(Pid, {start_replication, ReqRef, Port, RepOpts}, infinity).
 
 %% @doc Ask vx_wal_stream to stop replicating of the data.
 -spec stop_replication(pid()) -> ok | {error, term()}.
@@ -219,7 +220,7 @@ log_path(Partition) ->
     LogId = LogFile ++ "--" ++ LogFile,
     filename:join(DataDir, LogId).
 
-init_stream({call, {Sender, _} = F}, {start_replication, Port, Opts}, Data) ->
+init_stream({call, {Sender, _} = F}, {start_replication, ReqRef, Port, Opts}, Data) ->
     %% FIXME: We support only single partition for now
     {LWalOffset0, RWalOffset0} =
         case proplists:get_value(offset, Opts, none) of
@@ -236,6 +237,9 @@ init_stream({call, {Sender, _} = F}, {start_replication, Port, Opts}, Data) ->
            ?MODULE, notify_commit, [self()]),
     {_, Backoff} = backoff:succeed(Data#data.file_poll_backoff),
 
+    ReplicationRef = make_ref(),
+    ok = vx_wal_tcp_worker:send_start(Port, ReqRef, ReplicationRef),
+
     {next_state, await_data, Data#data{client = Sender,
                                        mon_ref = MonRef,
                                        file_pos = FileCurOffset,
@@ -248,7 +252,7 @@ init_stream({call, {Sender, _} = F}, {start_replication, Port, Opts}, Data) ->
                                            = proplists:get_bool(raw_values, Opts)
                                       },
      [{state_timeout, 0, {timeout, undefined, file_poll_retry} },
-      {reply, F, {ok, self()}}]};
+      {reply, F, {ok, ReplicationRef}}]};
 
 init_stream(info, {gen_event_EXIT, _Handler, _Reason}, Data) ->
     {keep_state, Data};

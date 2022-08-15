@@ -27,6 +27,7 @@ groups() ->
          single_txn_via_client,
          multiple_txns_via_client,
          replication_from_position,
+         replication_from_position_batch_api,
          replication_from_eof,
          {setup_interleavings, [],
           [interleavings_sanity_check || _ <- lists:seq(1, 5)]
@@ -56,7 +57,10 @@ init_per_group(setup_meck, _Config) ->
     meck:expect(vx_wal_tcp_worker, send,
                 fun(Port, _DcId, TxId, TxOffset, TxOpsList) ->
                         Port ! {wal_msg, TxId, TxOffset, TxOpsList}, true
-                end);
+                end),
+     meck:expect(vx_wal_tcp_worker, send_start,
+                fun(_, _, _) -> ok end);
+
 init_per_group(client, Config) ->
     ct:comment("Group of tests that use vx_client"),
     Config;
@@ -119,11 +123,11 @@ end_per_group(setup_node, Config) ->
 sanity_check(_Config) ->
     ct:comment("Sanity check"),
     {ok, Pid} = vx_wal_stream:start_link([]),
-    {ok, _}   = vx_wal_stream:start_replication(Pid, self(), []),
+    {ok, _}   = vx_wal_stream:start_replication(Pid, make_ref(), self(), []),
     ok = vx_wal_stream:stop_replication(Pid),
 
     {ok, Pid2} = vx_wal_stream:start_link([]),
-    {ok, _} = vx_wal_stream:start_replication(Pid2, self(), []),
+    {ok, _} = vx_wal_stream:start_replication(Pid2, make_ref(), self(), []),
     ok = vx_wal_stream:stop_replication(Pid2),
     ok.
 
@@ -134,7 +138,7 @@ single_txn(_Config) ->
     ?vtest:assert_receive(100),
 
     {ok, Pid} = vx_wal_stream:start_link([]),
-    {ok, _}   = vx_wal_stream:start_replication(Pid, self(), []),
+    {ok, _}   = vx_wal_stream:start_replication(Pid, make_ref(), self(), []),
 
     [Msg] = ?vtest:assert_count(1, 1000),
     ct:log("message: ~p~n", [Msg]),
@@ -150,7 +154,7 @@ single_txn_from_history(_Config) ->
     {Key, Bucket, Type, Value} = {key_a, <<"my_bucket">>, antidote_crdt_counter_pn, 5},
 
     {ok, Pid} = vx_wal_stream:start_link([]),
-    {ok, _}   = vx_wal_stream:start_replication(Pid, self(), []),
+    {ok, _}   = vx_wal_stream:start_replication(Pid, make_ref(), self(), []),
     [Msg] = ?vtest:assert_count(1, 1000),
     ct:log("message: ~p~n", [Msg]),
 
@@ -167,7 +171,7 @@ single_txn_from_history2(_Config) ->
     {Key, Bucket, Type, _Value} = {key_a, <<"my_bucket">>, antidote_crdt_counter_pn, 5},
 
     {ok, Pid} = vx_wal_stream:start_link([]),
-    {ok, _}   = vx_wal_stream:start_replication(Pid, self(), []),
+    {ok, _}   = vx_wal_stream:start_replication(Pid, make_ref(), self(), []),
     [Msg] = ?vtest:assert_count(1, 1000),
     ct:log("~p message: ~p~n", [?LINE, Msg]),
 
@@ -267,6 +271,24 @@ replication_from_position(_Config) ->
               ?assertEqual([Msg4, Msg5, Msg6], [Msg41, Msg51, Msg61])
       end).
 
+replication_from_position_batch_api(_Config) ->
+    ct:comment("Test replication from the middle of the transaction list"),
+    {Key, Bucket, Type, _Value} = {key_w, <<"u_bucket">>, antidote_crdt_counter_pn, 0},
+    K = key_format(Key, Bucket),
+
+    ?vtest:with_replication_con(
+       [{offset, 0}, {sync, 3}],
+       fun(C) ->
+                  %% Skip first messages
+               [_, _, _] = ?vtest:assert_count_msg(C, 3, 1000),
+               ok = vx_client:get_next_stream_bulk(C, 3),
+               [Msg4, Msg5, Msg6] = ?vtest:assert_count_msg(3, 1000),
+
+               ?assertMatch(#vx_wal_txn{ txid = _Txid,
+                                         ops = [{K, Type, 4, [2, 2]}]
+                                       }, Msg6),
+               [Msg4, Msg5, Msg6]
+          end).
 
 replication_from_eof(_Config) ->
     ct:comment("Test replication from eof of file"),

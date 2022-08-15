@@ -53,7 +53,12 @@
 
 -record(vx_client_msg,
         { pid :: pid(),
-          msg :: #vx_wal_txn{}
+          msg :: #vx_wal_txn{},
+          %% When await_sync = true, that means tnat
+          %% connection will no longer send messages
+          %% to the client process, unless it request
+          %% more data
+          await_sync = false :: boolean()
         }).
 
 -endif.
