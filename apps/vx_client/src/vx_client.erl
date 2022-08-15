@@ -16,7 +16,8 @@
 -type connection() :: pid().
 -type address() :: inet:socket_address() | inet:hostname().
 
--spec connect(address(), inet:port_number(), list()) ->
+-spec connect(address(), inet:port_number(),
+              [{connection_timeout, non_neg_integer()}]) ->
           {ok, connection()} | {error, term()}.
 connect(Address, Port, Options) ->
     vx_client_socket:start_link(Address, Port, Options).
