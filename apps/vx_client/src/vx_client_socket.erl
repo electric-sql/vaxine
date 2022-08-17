@@ -196,15 +196,18 @@ limited_streaming({call, CliRef}, #get_next_bulk{n = N},
     {keep_state, State#state{sync_mode = N + Mode},
      [{reply, CliRef, ok}]
     };
-limited_streaming(info, {tcp, Socket, Binary}, #state{socket = Socket} = State) ->
+limited_streaming(info, {tcp, Socket, Binary},
+                  #state{socket = Socket, sync_mode = Remaining} = State) ->
     try
         handle_vx_wal_protocol(Binary, State)
     of
         {ok, StreamMsg} ->
-            State#state.owner ! #vx_client_msg{pid = self(),
-                                               msg = StreamMsg
-                                              },
-            {keep_state, State}
+            State#state.owner !
+                #vx_client_msg{pid = self(),
+                               msg = StreamMsg,
+                               await_sync = (Remaining =< 1)
+                              },
+            {keep_state, State#state{sync_mode = Remaining - 1}}
     catch T:E ->
             %% FIXME: If we intend to support auto-reconnect after such a failure
             %% we need to notify the client somehow.
@@ -394,6 +397,8 @@ schedule_reconnect(State = #state{reconnect_backoff = Backoff}) ->
 default_handling(info, {'EXIT', Owner, Reason}, #state{owner = Owner}) ->
     logger:debug("Owner of the socket process terminated ~p~n", [Owner]),
     {stop, {shutdown, Reason}};
+default_handling(info, {tcp_passive, _}, State) ->
+    {keep_state, State};
 default_handling({call, CliReq}, stop, #state{socket = Socket}) ->
     case Socket of
         undefined ->
