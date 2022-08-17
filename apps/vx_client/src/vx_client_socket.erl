@@ -54,7 +54,7 @@
                  sync_mode :: false | non_neg_integer()
                }).
 
--spec start_link(address(), inet:port_number(), []) ->
+-spec start_link(address(), inet:port_number(), list()) ->
           {ok, pid()} | ignore | {error, term()}.
 start_link(Address, Port, Options) ->
     gen_statem:start_link(?MODULE, [Address, Port, Options, self()], []).
