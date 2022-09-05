@@ -16,10 +16,8 @@ groups() ->
     [{setup_cluster, [],
       [
        wal_replication_from_multiple_dc,
-       {setup_interleavings, [],
-        [
-         interleavings_sanity_check
-        ]}
+       {setup_interleavings, [], [interleavings_sanity_check]},
+       one_direction_sanity_check
       ]}
     ].
 
@@ -92,7 +90,6 @@ end_per_group(setup_cluster, Config) ->
     Config.
 
 wal_replication_from_multiple_dc(Config) ->
-    io:format("Config: ~p~n", [Config]),
     ct:log("Local time: ~p~n", [os:timestamp()]),
 
     lists:foreach(
@@ -132,6 +129,35 @@ interleavings_sanity_check(Config) ->
       end),
     {save_config, [{next_pos, NextPos + 1} | proplists:delete(next_pos, Config)]}.
 
+one_direction_sanity_check(Config) ->
+    Bucket = <<"mybucket">>,
+    [Dev1, Dev2] = lists:flatten(?config(clusters, Config)),
+
+    ?vtest:with_replication_con(Dev1,
+      [{offset, eof}],
+      fun(_) ->
+              {ok, APid} = ?vtest:an_connect(Dev2),
+              {ok, TxId} = ?vtest:an_start_tx(APid),
+
+              interleave_update_value(
+                [ { {APid, TxId}, [{?FUNCTION_NAME, 88}] }],
+                Bucket),
+
+              L0 = ?vtest:assert_count(
+                     1, 10000,
+                     fun(#vx_client_msg{msg =
+                                            #vx_wal_txn{ txid = TxId0,
+                                                         wal_offset = WalOffset0,
+                                                         ops = Ops
+                                                       }}) ->
+                             [ binary_to_atom(K, utf8) || {{K, _}, _, _, _} <- Ops ]
+                     end),
+              ?assertEqual(L0, [[?FUNCTION_NAME]])
+      end).
+
+%%------------------------------------------------------------------------------
+%% helpfuns
+%%------------------------------------------------------------------------------
 
 -spec interleave_update_value([ {{pid(), term()}, [{atom(), term()}]} ],
                               antidote:bucket()) ->

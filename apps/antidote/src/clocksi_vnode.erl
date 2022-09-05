@@ -506,7 +506,6 @@ commit(Transaction, TxCommitTime, Updates, CommittedTx, State) ->
                 {ok, _} ->
                     case update_materializer(Updates, Transaction, TxCommitTime) of
                         ok ->
-                            ok = notify_on_commit(LogId, LogRecord),
                             NewPreparedDict = clean_and_notify(TxId, Updates, State),
                             meta_data_sender:put_meta(stable_time_functions,
                                                       local_dc, State#state.partition,
@@ -678,15 +677,6 @@ get_time([{Time, TxId} | Rest], TxIdCheck) ->
         false ->
             get_time(Rest, TxIdCheck)
     end.
-
-notify_on_commit([LogId], #log_operation{op_type = commit} = OP) ->
-    TxId = OP#log_operation.tx_id,
-    CommitPayload = OP#log_operation.log_payload,
-    logging_notification_server:notify_commit(
-      LogId, TxId,
-      CommitPayload#commit_log_payload.commit_time,
-      CommitPayload#commit_log_payload.snapshot_time
-     ).
 
 %%%===================================================================
 %%%  Ets tables
