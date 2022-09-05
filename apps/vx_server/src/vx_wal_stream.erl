@@ -34,8 +34,8 @@
         }).
 
 -include_lib("stdlib/include/ms_transform.hrl").
-
 -include_lib("antidote/include/antidote.hrl").
+-include_lib("antidote/include/meta_data_notif_server.hrl").
 -include("vx_wal_stream.hrl").
 
 -define(POLL_RETRY_MIN, 10).
@@ -276,7 +276,8 @@ await_data(_, {timeout, TRef, file_poll_retry}, Data = #data{file_poll_tref = TR
 
 await_data(_, {timeout, TRef, port_send_retry}, Data = #data{port_retry_tref = TRef}) ->
     logger:debug("tpc port retry: ~p~n", [Data#data.port_retry_backoff]),
-    continue_send(Data#data{port_retry_tref = undefined});
+    {ok, SN} = dc_utilities:get_stable_snapshot([include_local_dc]),
+    continue_send(SN, Data#data{port_retry_tref = undefined});
 
 await_data({call, Sender}, {stop_replication}, Data) ->
     _ = file:close(Data#data.file_desc),
@@ -321,14 +322,20 @@ await_data(info, {inet_reply, _Sock, Reason}, Data) ->
             {stop, {shutdown, Reason}, Data}
     end;
 
+await_data(info, #md_stable_snapshot{sn = Sn}, Data) ->
+    %% We received notification about snapshot being stable for some of the
+    %% transasctions we couldn't send previously
+    logger:debug("stable notification: ~p~n", [Sn]),
+    continue_send(Sn, Data);
+
 await_data(_, Msg, _Data) ->
     logger:info("Ignored message wal streamer: ~p~n", [Msg]),
     keep_state_and_data.
 
 %%------------------------------------------------------------------------------
 
-continue_send(#data{} = Data) ->
-    case notify_client(Data#data.to_send, Data) of
+continue_send(SN, #data{} = Data) ->
+    case notify_client(SN, Data#data.to_send, Data) of
         {ok, Data1} when Data1#data.file_status == more_data ->
             continue_wal_reading(Data1);
         {retry, Data1} ->
@@ -354,9 +361,10 @@ continue_wal_reading(#data{partition = Partition} = Data) ->
                     %% All the data is read, no need to set the timer
                     {next_state, await_data, Data1#data{last_notif_txid = TxId}};
                 {TxId, _, _} when TxId == Data1#data.last_notif_txid ->
-                    %% No matter whether or not we read something new,
-                    %% we didn't read TxId transaction, so set the poll timer
-                    %% based on backoff value
+                    %% No matter whether or not we read something new, we didn't
+                    %% read TxId transaction, so set the poll timer based on
+                    %% backoff value. That may happen if WAL is not immediatly
+                    %% synced after transasction is committed.
                     {next_state, await_data, set_file_poll_timer(Data1)};
                 {TxId, _, _} ->
                     %% New TxId since we last checked. For now I would like
@@ -404,7 +412,7 @@ open_log(LogFile, WalPos) ->
     end.
 
 read_ops_from_log(Data) ->
-    case read_ops_from_log(Data, 0) of
+    case read_ops_from_log(undefined, Data, 0) of
         {ok, 0, Data1} ->
             {_, Backoff} = backoff:fail(Data1#data.file_poll_backoff),
             {ok, Data1#data{file_poll_backoff = Backoff}};
@@ -415,7 +423,7 @@ read_ops_from_log(Data) ->
             Error
     end.
 
-read_ops_from_log(#data{txns_buffer = TxNotComitted0,
+read_ops_from_log(SN, #data{txns_buffer = TxNotComitted0,
                         file_pos = FPos,
                         file_buff = FBuff,
                         file_desc = Fd
@@ -438,13 +446,22 @@ read_ops_from_log(#data{txns_buffer = TxNotComitted0,
 
             {ok, ComittedData, Data1} =
                 process_txns(NewTerms, TxNotComitted0, [], TxOffset,
-                             Data#data{file_pos = FPos1, file_buff = FBuff1,
+                             Data#data{file_pos = FPos1,
+                                       file_buff = FBuff1,
                                        file_status = more_data
                                        }
                             ),
-            case notify_client(ComittedData, Data1) of
+            %% We try to postpone get_stable_snapshot here
+            {ok, SnStable}
+                = case SN of
+                      undefined -> dc_utilities:get_stable_snapshot(
+                                     [include_local_dc]);
+                      _ ->
+                          {ok, SN}
+                  end,
+            case notify_client(SnStable, ComittedData, Data1) of
                 {ok, Data2} ->
-                    read_ops_from_log(Data2, N+1);
+                    read_ops_from_log(SnStable, Data2, N+1);
                 {retry, Data2} ->
                     {ok, N + 1, Data2};
                 {error, _} = Error ->
@@ -505,8 +522,11 @@ read_chunk(Fd, FileName, FPos, FBuff, Amount) ->
                    file_offset(), state()) ->
           {ok, txns_comitted(), state()}.
 process_txns([], TxnsNonComitted, FinalizedTxns, _, Data) ->
-    {ok, preprocess_comitted(FinalizedTxns),
-     Data#data{ txns_buffer = TxnsNonComitted }};
+    {Txns, LastTxId} = preprocess_comitted(FinalizedTxns,
+                                           Data#data.last_read_txid),
+    {ok, Txns, Data#data{ txns_buffer = TxnsNonComitted,
+                          last_read_txid = LastTxId
+                        }};
 process_txns([{_, LogRecord} | Rest], TxnsNonComitted0, FinalizedTxns0, TxOffset, Data) ->
     #log_record{log_operation = LogOperation} =
         log_utilities:check_log_record_version(LogRecord),
@@ -598,16 +618,21 @@ prepare_txn_aborted(TxId, TxStartOffset, TxAbortOffset) ->
                 start_offset = TxStartOffset
               }.
 
-preprocess_comitted(L) ->
-    lists:reverse(L).
+preprocess_comitted([], LastTxId) ->
+    {[], LastTxId};
+preprocess_comitted([#wal_trans{txid = TxId} | _] = L, _) ->
+    {lists:reverse(L), TxId}.
 
-notify_client(FinalyzedTxns, Data = #data{port = Port,
-                                          right_offset_border = RB,
-                                          last_notif_txid = LastSendTx,
-                                          left_offset_border = LB,
-                                          opts_raw_values = RawValuesB
-                                         }) ->
-    case notify_client0(FinalyzedTxns, LastSendTx, Port, LB, RB, RawValuesB) of
+notify_client(SnStable, FinalyzedTxns,
+              Data = #data{port = Port,
+                           right_offset_border = RB,
+                           last_notif_txid = LastSendTx,
+                           left_offset_border = LB,
+                           opts_raw_values = RawValuesB
+                          }) ->
+    case
+        notify_client0(SnStable, FinalyzedTxns, LastSendTx, Port, LB, RB, RawValuesB)
+    of
         {ok, LastTxId, LB1, RB1} ->
             {ok, Data#data{last_notif_txid = LastTxId,
                            left_offset_border = LB1,
@@ -621,24 +646,51 @@ notify_client(FinalyzedTxns, Data = #data{port = Port,
                                 left_offset_border = LB1,
                                 right_offset_border = RB1
                                })};
+        {retry2, TxSt, NotSendTxns, LastTxId, LB1, RB1} ->
+            ok = meta_data_notif_server:subscribe_to_stable(TxSt),
+            {retry, Data#data{to_send = NotSendTxns,
+                              last_notif_txid = LastTxId,
+                              left_offset_border = LB1,
+                              right_offset_border = RB1
+                             }};
         {error, Reason} ->
             {error, Reason}
     end.
 
-notify_client0([#wal_trans{materialized = none} | FinalyzedTxns],
+notify_client0(SN, [#wal_trans{materialized = none} | FinalyzedTxns],
                LastSentTx, Port, LB, RB, RawValuesB) ->
-    notify_client0(FinalyzedTxns, LastSentTx, Port, LB, RB, RawValuesB);
-notify_client0([#wal_trans{txid = TxId, end_offset = EOffset} | FinalyzedTxns],
+    notify_client0(SN, FinalyzedTxns, LastSentTx, Port, LB, RB, RawValuesB);
+notify_client0(SN, [#wal_trans{txid = TxId, end_offset = EOffset} | FinalyzedTxns],
                LastSentTx, Port, LB, RB, RawValuesB)
   when EOffset < RB ->
     logger:debug("skip transaction with commit offset: ~p~n", [EOffset]),
-    notify_client0(FinalyzedTxns, LastSentTx, Port,
+    notify_client0(SN, FinalyzedTxns, LastSentTx, Port,
                    remove_left_border(TxId, LB), RB, RawValuesB);
-notify_client0([#wal_trans{txid = TxId, dcid = DcId, snapshot = TxST,
-                           materialized = TxOpsList,
-                           start_offset = _SOffset,
-                           end_offset = EOffset
-                          } | FinalyzedTxns] = Txns, LastTxn, Port, LB, RightOffset,
+notify_client0(SN, [#wal_trans{snapshot = TxST} | FinalyzedTxns] = Txns, LastTxn,
+               Port, LB, RightOffset, RawValuesB) ->
+    %% FIXME: We have a general assumption here, that transactions in the WAL
+    %% log are sorted according to snapshot order, which is not the case in current
+    %% wal implementation. This should not cause issues in single partition case
+    %% though.
+    try vectorclock:ge(SN, TxST) of
+        true ->
+            notify_client1(SN, Txns, LastTxn,
+                           Port, LB, RightOffset, RawValuesB);
+        false ->
+            {retry2, TxST, Txns, LastTxn, LB, RightOffset}
+    catch
+        _:_ ->
+            {retry2, TxST, Txns, LastTxn, LB, RightOffset}
+    end;
+notify_client0(_, [], LastTxn, _, LB, RB, _) ->
+    {ok, LastTxn, LB, RB}.
+
+
+notify_client1(SN, [#wal_trans{txid = TxId, dcid = DcId, snapshot = TxST,
+                               materialized = TxOpsList,
+                               start_offset = _SOffset,
+                               end_offset = EOffset
+                              } | FinalyzedTxns] = Txns, LastTxn, Port, LB, RightOffset,
                RawValuesB
               ) ->
     LeftOffset = case LB of
@@ -658,13 +710,11 @@ notify_client0([#wal_trans{txid = TxId, dcid = DcId, snapshot = TxST,
             %% We need to retry later, port is busy
             {retry, Txns, LastTxn, LB, RightOffset};
         true ->
-            notify_client0(FinalyzedTxns, TxId, Port,
+            notify_client0(SN, FinalyzedTxns, TxId, Port,
                            remove_left_border(TxId, LB), EOffset, RawValuesB);
         {error, Reason} ->
             {error, Reason}
-    end;
-notify_client0([], LastTxn, _, LB, RB, _) ->
-    {ok, LastTxn, LB, RB}.
+    end.
 
 add_left_border(TxOffset, TxId, Data = #data{left_offset_border = OrdDict}) ->
     Data#data{ left_offset_border = orddict:store(TxOffset, TxId, OrdDict) }.

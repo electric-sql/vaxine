@@ -181,7 +181,7 @@ single_txn_from_history2(_Config) ->
     ?vtest:assert_receive(100),
 
     {ok, _SN1} = simple_update_value([{Key, 6}], Bucket),
-    [Msg1] = ?vtest:assert_count(1, 1000),
+    [Msg1] = ?vtest:assert_count(1, 10000),
     ct:log("~p message: ~p~n", [?LINE, Msg1]),
 
     Ops2 = [6],
@@ -345,8 +345,11 @@ key_format(Key, Bucket) ->
     {erlang:atom_to_binary(Key, latin1), Bucket}.
 
 simple_update_value(KVList, Bucket) ->
-    {ok, Pid} = antidotec_pb_socket:start_link("127.0.0.1",
-                                               vx_test_utils:port(antidote, pb_port, 0)),
+    simple_update_value(KVList, Bucket, "127.0.0.1",
+                        vx_test_utils:port(antidote, pb_port, 0)).
+
+simple_update_value(KVList, Bucket, Host, Port) ->
+    {ok, Pid} = antidotec_pb_socket:start_link(Host, Port),
     {ok, TxId} = antidotec_pb:start_transaction(Pid, ignore, [{static, false}]),
 
     UpdateOps =

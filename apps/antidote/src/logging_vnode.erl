@@ -487,6 +487,9 @@ handle_command(
                         NewBOpId = BOpId#op_number{local = BLocal + 1, global = BGlobal + 1},
                         true = update_ets_op_id({LogId, Bucket, MyDCID}, NewBOpId, OpIdTable),
                         NewBOpId;
+                    OpType when OpType == commit ->
+                        notify_on_commit(Partition, LogOperation),
+                        NewOpId;
                     _ ->
                         NewOpId
                 end,
@@ -559,6 +562,9 @@ handle_command(
                                 true = update_ets_op_id(
                                     {LogId, Bucket, MyDCID}, NewBOpId, OpIdTable
                                 );
+                            OpType when OpType == commit ->
+                                notify_on_commit(Partition, LogOperation),
+                                true;
                             _ ->
                                 true
                         end,
@@ -1376,6 +1382,16 @@ get_op_id(ClockTable, Key = {_, _, DCID}) ->
         {ok, Val} ->
             Val
     end.
+
+notify_on_commit(Partition, #log_operation{op_type = commit} = OP) ->
+    TxId = OP#log_operation.tx_id,
+    CommitPayload = OP#log_operation.log_payload,
+    logging_notification_server:notify_commit(
+      Partition, TxId,
+      CommitPayload#commit_log_payload.commit_time,
+      CommitPayload#commit_log_payload.snapshot_time
+     ).
+
 
 %%%===================================================================
 %%%  Ets tables

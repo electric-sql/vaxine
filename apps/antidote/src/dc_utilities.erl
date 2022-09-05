@@ -249,6 +249,7 @@ check_registered(Name) ->
 
 %% @doc Returns stable snapshot time.
 %% Does not include information about local DC.
+-spec get_stable_snapshot() -> {ok, snapshot_time()}.
 get_stable_snapshot() ->
     get_stable_snapshot([]).
 

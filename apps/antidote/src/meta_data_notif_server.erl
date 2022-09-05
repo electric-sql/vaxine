@@ -2,7 +2,7 @@
 %% event when the provided snapshot becomes stable.
 
 -module(meta_data_notif_server).
-
+-behaviour(gen_server).
 -include("antidote.hrl").
 -include("meta_data_notif_server.hrl").
 
@@ -12,10 +12,13 @@
 -endif.
 
 -export([start_link/0, start/0,
-         init/0,
-         loop/1,
          subscribe_to_stable/1,
-         notify/2
+         notify/2, stop/0
+        ]).
+-export([init/1,
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2
         ]).
 
 -record(state, { mons = [] :: [{pid(), reference()}],
@@ -27,18 +30,17 @@
 -type state() :: #state{}.
 
 start_link() ->
-    proc_lib:start_link(?MODULE, init, []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 start() ->
-    proc_lib:start(?MODULE, init, []).
+    gen_server:start({local, ?MODULE}, ?MODULE, [], []).
 
 %% @doc API to subscribe to stable snapshot notifications. Notification server
 %% will send notification of the form `#md_stable_snapshot{}` to the calling process.
 %% Same client may subscribe to multiple snapshots at the same time.
 -spec subscribe_to_stable(antidote:snapshot_time()) -> ok.
 subscribe_to_stable(Snapshot) ->
-    whereis(?MODULE) ! {add_snapshot, Snapshot, self()},
-    ok.
+    gen_server:cast(?MODULE, {add_snapshot, Snapshot, self()}).
 
 %% @doc Meta data server notifies notif server about new stable snapshot.
 -spec notify(stable_time_functions, antidote:snapshot_time()) -> ok.
@@ -47,37 +49,39 @@ notify(stable_time_functions, Snapshot) ->
     whereis(?MODULE) ! {stable_snapshot, Snapshot},
     ok.
 
+stop() ->
+    gen_server:call(?MODULE, stop).
+
 %%------------------------------------------------------------------------------
 
-init() ->
-    try erlang:register(?MODULE, self()) of
-        true ->
-            proc_lib:init_ack({ok, self()}),
-            loop(#state{})
-    catch _:_ ->
-            proc_lib:init_ack({error, already_registered})
-    end.
+init([]) ->
+    {ok, #state{}}.
 
-loop(State) ->
-    receive
-        {add_snapshot, Snapshot, Pid} ->
-            ?MODULE:loop(add_snapshot(Snapshot, Pid, State));
+handle_call(stop, _, State) ->
+    {stop, normal, ok, State};
+handle_call(_, _, State) ->
+    {reply, {error, not_implemented}, State}.
 
-        {stable_snapshot, SN}
-          when (State#state.min_snapshot =/= undefined) ->
-            SN1 = wait_for_latest(SN),
-            ?MODULE:loop(notify_subscribers(SN1, State));
+handle_cast({add_snapshot, Snapshot, Pid}, State) ->
+    {noreply, add_snapshot(Snapshot, Pid, State)};
 
-        {stable_snapshot, _} ->
-            ?MODULE:loop(State);
+handle_cast(Msg, State) ->
+    logger:warning("Unhandled message: ~p ~p~n", [Msg]),
+    {noreply, State}.
 
-        {'DOWN', _MonRef, process, Pid, _} ->
-            ?MODULE:loop(remove_subscriber(Pid, State#state.mons));
+handle_info({stable_snapshot, SN}, State)
+    when (State#state.min_snapshot =/= undefined) ->
+    SN1 = wait_for_latest(SN),
+    {noreply, notify_subscribers(SN1, State)};
+handle_info({stable_snapshot, _}, State) ->
+    {noreply, State};
+handle_info({'DOWN', _MonRef, process, Pid, _}, State) ->
+    Mons = remove_subscriber(Pid, State#state.mons),
+    {noreply, State#state{mons = Mons}};
 
-        stop ->
-            unregister(?MODULE),
-            exit(normal)
-    end.
+handle_info(Msg, State) ->
+    logger:warning("Unhandled message: ~p ~p~n", [Msg]),
+    {noreply, State}.
 
 %%------------------------------------------------------------------------------
 
@@ -159,6 +163,10 @@ add_subscriber(Pid, Mons0) ->
             [{Pid, MonRef} | Mons0]
     end.
 
+%% This function is a potential space leak, as with many partitions and current
+%% implementation it can cause huge vector_orddict containing snapshot that
+%% can not become stable, due to partial partition unavailability. (only part of
+%% the transaction is replicated).
 -spec add_snapshot(pid(), antidote:snapshot_time(), antidote:snapshot_time(),
                    vector_orddict:vector_orddict([pid()])) ->
           { antidote:snapshot_time(), vector_orddict:vector_orddict([pid()]) }.
@@ -219,7 +227,7 @@ sanity_check_test() ->
     [#md_stable_snapshot{sn = V2}] = assert_count(1, 1000),
     assert_receive(100),
 
-    Pid ! stop,
+    stop(),
     receive {'DOWN', MonRef, process, Pid, _} -> ok end,
     ok.
 
@@ -288,11 +296,11 @@ prop_notif_ordering_worker(NotifyVV0, VVList0) ->
         assert_receive(10)
     of
         ok ->
-            Pid ! stop,
+            stop(),
             receive {'DOWN', MonRef, process, Pid, _} -> ok end,
             true
     catch _:_ ->
-            Pid ! stop,
+            stop(),
             receive {'DOWN', MonRef, process, Pid, Reason} -> ok end,
             io:format("state: ~p~n", [Reason]),
             false
