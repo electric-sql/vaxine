@@ -366,13 +366,16 @@ handle_client_msg(#stop_replication{}, _, CliRef, State) ->
 
 handle_vx_wal_protocol(Binary, State = #state{last_req_id = Ref}) ->
     Data = binary_to_term(Binary),
-    logger:debug("received data from server: ~p~n", [Data]),
     case Data of
         #vx_wal_txn{} ->
+            logger:debug("received #vx_wal_txn from server: ~p - ~p~n",
+                         [Data#vx_wal_txn.txid, Data#vx_wal_txn.wal_offset]),
             {ok, Data};
         #vx_srv_res{ref = R, msg = Msg} when R == Ref ->
+            logger:debug("received #vx_srv_res from server: ~p~n",[Data]),
             {ok, Msg, State#state{last_req_id = undefined}};
         _ ->
+            logger:warning("Unexpected data received: ~p~n", [ Data ]),
             throw({unexpected_msg, Data})
     end.
 
