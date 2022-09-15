@@ -141,7 +141,7 @@ stop_replication(Pid) ->
           ok.
 notify_commit(Pid, Partition, TxId, CommitTime, SnapshotTime) ->
     try
-        logger:info("commit notification ~p~n~p~n",
+        logger:debug("commit notification ~p~n~p~n",
                     [TxId, [Partition, TxId, CommitTime, SnapshotTime]]),
         true = ets:update_element(wal_replication_status, {Partition, Pid},
                            { #wal_replication_status.txdata,
@@ -303,7 +303,7 @@ await_data({call, Sender}, {stop_replication}, Data) ->
     };
 
 await_data({call, Sender}, Msg, Data) ->
-    logger:info("Ignored message: ~p~n", [Msg]),
+    logger:warning("Ignored message: ~p~n", [Msg]),
     {keep_state, Data, [{reply, Sender, {error, unhandled_msg}}] };
 
 await_data(info, {gen_event_EXIT, _Handler, _Reason}, Data) ->
@@ -349,7 +349,7 @@ continue_send(SN, #data{} = Data) ->
     end.
 
 continue_wal_reading(#data{partition = Partition} = Data) ->
-    logger:info("Continue wal streaming for client ~p on partition ~p"
+    logger:debug("Continue wal streaming for client ~p on partition ~p"
                 " at position ~p~n",
                 [Data#data.client, Data#data.partition, Data#data.file_pos]),
 

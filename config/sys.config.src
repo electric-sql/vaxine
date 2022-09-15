@@ -8,17 +8,26 @@
       {handler, default, logger_std_h,
         #{level => debug,
           formatter => {logger_formatter, #{single_line => false, max_size => 2048}},
-          config => #{type => standard_io}}},
+          config => #{type => standard_io},
+          filters => [ {no_progress, {fun logger_filters:progress/2, stop}} ]
+         }
+      },
 
       {handler, debug, logger_std_h,
         #{level => info,
           formatter => {logger_formatter, #{single_line => true, max_size => 2048}},
-          config => #{type => {file, "${ROOT_DIR_PREFIX}${LOGGER_DIR_PREFIX}logger_logs/info.log"}}}},
+          config => #{type => {file, "${ROOT_DIR_PREFIX}${LOGGER_DIR_PREFIX}logger_logs/info.log"}},
+          filters => [ {no_progress, {fun logger_filters:progress/2, stop}} ]
+         }
+      },
 
       {handler, errors, logger_std_h,
         #{level => error,
           formatter => {logger_formatter, #{single_line => false, max_size => 2048}},
-          config => #{type => {file, "${ROOT_DIR_PREFIX}${LOGGER_DIR_PREFIX}logger_logs/errors.log"}}}}
+          config => #{type => {file, "${ROOT_DIR_PREFIX}${LOGGER_DIR_PREFIX}logger_logs/errors.log"}},
+          filters => [ {no_progress, {fun logger_filters:progress/2, stop}} ]
+         }
+      }
     ]},
     {logger_level, info}
   ]},
