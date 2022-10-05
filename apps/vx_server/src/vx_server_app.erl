@@ -14,7 +14,10 @@
          get_pb_port/0]).
 
 start(_StartType, _StartArgs) ->
-    vx_server_sup:start_link().
+    Res = vx_server_sup:start_link(),
+    {ok, Vsn} = application:get_key(vx_server, vsn),
+    logger:notice("vx_server started ~s~n", [Vsn]),
+    Res.
 
 stop(_State) ->
     ok.
