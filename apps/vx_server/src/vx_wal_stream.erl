@@ -189,6 +189,7 @@ callback_mode() ->
 init(_Args) ->
     %% FIXME: Only work with a single partition at the moment
     %% FIXME: Move this initialization back to start_replication
+    erlang:process_flag(trap_exit, true),
     [Partition] = dc_utilities:get_all_partitions(),
     %% We would like to know where the file is located
     InfoList = [_|_] = disk_log:info(log_path(Partition)),
@@ -285,16 +286,14 @@ await_data({call, Sender}, {stop_replication}, Data) ->
     erlang:demonitor(Data#data.mon_ref),
     {_, FBackoff} = backoff:succeed(Data#data.file_poll_backoff),
     {_, PBackoff} = backoff:succeed(Data#data.port_retry_backoff),
-    _ = case Data#data.file_poll_tref of
-            undefined -> ok;
-            TRef0 -> erlang:cancel_timer(TRef0)
-        end,
-    _ = case Data#data.port_retry_tref of
-            undefined -> ok;
-            TRef1 -> erlang:cancel_timer(TRef1)
-        end,
+
+    _ = maybe_cancel_timer(Data#data.file_poll_tref),
+    _ = maybe_cancel_timer(Data#data.port_retry_tref),
+    _ = maybe_close_file(Data#data.file_desc),
+
     {next_state, init_stream, #data{file_name = Data#data.file_name,
                                     file_status = more_data,
+                                    file_desc = undefined,
                                     txns_buffer = #{},
                                     partition = Data#data.partition,
                                     file_poll_backoff = FBackoff,
@@ -328,8 +327,11 @@ await_data(info, #md_stable_snapshot{sn = Sn}, Data) ->
     logger:debug("stable notification: ~p~n", [Sn]),
     continue_send(Sn, Data);
 
+await_data(info, {'DOWN', _Mref, process, Pid, _}, #data{client = Pid} = Data) ->
+    {stop, normal, Data};
+
 await_data(_, Msg, _Data) ->
-    logger:info("Ignored message wal streamer: ~p~n", [Msg]),
+    logger:warning("Ignored message wal streamer: ~p~n", [Msg]),
     keep_state_and_data.
 
 %%------------------------------------------------------------------------------
@@ -392,7 +394,10 @@ fetch_latest_position(Partition) ->
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
 
-terminate(_Reason, _SN, _SD) ->
+terminate(_Reason, _SN, #data{} = Data) ->
+    _ = maybe_cancel_timer(Data#data.file_poll_tref),
+    _ = maybe_cancel_timer(Data#data.port_retry_tref),
+    _ = maybe_close_file(Data#data.file_desc),
     ok.
 
 -spec open_log(file:filename_all(), integer() | eof) ->
@@ -601,8 +606,8 @@ process_op1(#log_operation{op_type = commit, tx_id = TxId, log_payload = Payload
     end.
 
 prepare_txn_comitted(TxId, TxST, DcId, TxStartOffset, TxCommitOffset, TxOpsList0) ->
-    logger:info("processed txn:~n ~p ~p:~p ~p~n",
-                [TxId, TxStartOffset, TxCommitOffset, TxOpsList0]),
+    logger:info("processed txn:~n ~p ~p:~p~n",
+                [TxId, TxStartOffset, TxCommitOffset]),
 
     #wal_trans{ txid = TxId,
                 dcid = DcId,
@@ -630,7 +635,7 @@ notify_client(SnStable, FinalyzedTxns,
                            left_offset_border = LB,
                            opts_raw_values = RawValuesB
                           }) ->
-    case
+    try
         notify_client0(SnStable, FinalyzedTxns, LastSendTx, Port, LB, RB, RawValuesB)
     of
         {ok, LastTxId, LB1, RB1} ->
@@ -655,6 +660,9 @@ notify_client(SnStable, FinalyzedTxns,
                              }};
         {error, Reason} ->
             {error, Reason}
+    catch
+        error:Reason ->
+            {error, Reason}
     end.
 
 notify_client0(SN, [#wal_trans{materialized = none} | FinalyzedTxns],
@@ -666,7 +674,7 @@ notify_client0(SN, [#wal_trans{txid = TxId, end_offset = EOffset} | FinalyzedTxn
     logger:debug("skip transaction with commit offset: ~p~n", [EOffset]),
     notify_client0(SN, FinalyzedTxns, LastSentTx, Port,
                    remove_left_border(TxId, LB), RB, RawValuesB);
-notify_client0(SN, [#wal_trans{snapshot = TxST} | FinalyzedTxns] = Txns, LastTxn,
+notify_client0(SN, [#wal_trans{snapshot = TxST} | _FinalyzedTxns] = Txns, LastTxn,
                Port, LB, RightOffset, RawValuesB) ->
     %% FIXME: We have a general assumption here, that transactions in the WAL
     %% log are sorted according to snapshot order, which is not the case in current
@@ -749,3 +757,12 @@ materialize(Key, Type, ST, TxId) ->
         materializer_vnode:read(
           Key, Type, ST, TxId, _PropertyList = [], Partition),
     Snapshot.
+
+maybe_cancel_timer(undefined) -> ok;
+maybe_cancel_timer(Ref) ->
+    erlang:cancel_timer(Ref).
+
+maybe_close_file(undefined) ->
+    ok;
+maybe_close_file(Fd) ->
+    catch file:close(Fd).
