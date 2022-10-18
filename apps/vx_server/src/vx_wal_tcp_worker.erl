@@ -34,6 +34,7 @@ send(Port, DcId, TxId, Offset, TxOpsList) ->
                        ops = TxOpsList },
     send_port(Port, Msg, [nosuspend]).
 
+-spec send_start(port(), reference(), reference()) -> ok.
 send_start(Port, ReqRef, ReplicationRef) ->
     Msg = #vx_srv_res{ref = ReqRef,
                       msg = #vx_srv_start_res{rep_id = ReplicationRef}},
