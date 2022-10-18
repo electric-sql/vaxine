@@ -1,37 +1,11 @@
-![Erlang CI](https://github.com/vaxine-io/vaxine/workflows/CI/badge.svg)
-[![Coverage Status](https://coveralls.io/repos/github/vaxine-io/vaxine/badge.svg?branch=main)](https://coveralls.io/github/vaxine-io/vaxine?branch=main)
-[![License - MIT](https://img.shields.io/badge/license-MIT-green)](./blob/main/LICENSE.md)
+![Erlang CI](https://github.com/electric-sql/vaxine/workflows/CI/badge.svg)
+[![Coverage Status](https://coveralls.io/repos/github/electric-sql/vaxine/badge.svg?branch=main)](https://coveralls.io/github/electric-sql/vaxine?branch=main)
+[![License - Apache 2.0](https://img.shields.io/badge/license-Apache-green)](./blob/main/LICENSE.md)
 ![Status - Alpha](https://img.shields.io/badge/status-alpha-red)
 
-<h2>
-  <picture>
-    <source media="(prefers-color-scheme: dark)"
-        srcset="https://vaxine.io/id/vaxine-logo-dark.png"
-    />
-    <source media="(prefers-color-scheme: light)"
-        srcset="https://vaxine.io/id/vaxine-logo-light.png"
-    />
-    <img alt="Vaxine logo" src="https://vaxine.io/id/vaxine-logo-light.png" />
-  </picture>
-</h2>
+# Vaxine
 
-Welcome to the Vaxine source code repository. Vaxine is a rich-CRDT database system based on AntidoteDB.
-
-## About Vaxine
-
-Vaxine is a rich-CRDT database system that extends Antidote with a relational data-model, invariant safety, query support and real-time subscriptions. Applications built on top of Vaxine offer:
-
-* low-latency, active-active geo-distribution
-* transactional causal+ consistency
-* relational data model
-* constraints and referential integrity
-* real-time subscriptions
-
-More information:
-
-- [Vaxine website](https://vaxine.io)
-- [Documentation](https://vaxine.io/docs)
-- [Example apps](https://vaxine.io/demos) ([source code](https://github.com/vaxine-io/examples))
+Welcome to the Vaxine source code repository. Vaxine is a rich-CRDT database system based on AntidoteDB. It's used as the core replication layer for [ElectricSQL](https://electric-sql.com).
 
 ## About Antidote
 
@@ -44,11 +18,6 @@ More information:
 
 Antidote is the reference platform of the [SyncFree](https://syncfree.lip6.fr/) and the [LightKone](https://www.lightkone.eu/) european projects.
 
-## Community Guidelines
-This repo contains guidelines for participating in the Vaxine community:
+## Community
 
-* [Code of Conduct](./CODE_OF_CONDUCT.md)
-* [Guide to Contributing](./CONTRIBUTING.md)
-* [Contributor License Agreement](./CLA.md)
-
-If you have any questions or concerns, please raise them on the [Vaxine community](https://vaxine.io/project/community) channels.
+If you have any questions, please raise them on the [ElectricSQL community](https://electric-sql.com/about/community) channels.
