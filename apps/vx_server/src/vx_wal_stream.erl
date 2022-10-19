@@ -340,6 +340,8 @@ continue_send(SN, #data{} = Data) ->
     case notify_client(SN, Data#data.to_send, Data) of
         {ok, Data1} when Data1#data.file_status == more_data ->
             continue_wal_reading(Data1);
+        {ok, Data1} ->
+            {keep_state, Data1};
         {retry, Data1} ->
             {keep_state, Data1};
         {error, _Reason} = Error ->
