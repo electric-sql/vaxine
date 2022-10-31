@@ -26,6 +26,7 @@
 
 %% Extracted from:
 %% -include_lib("kernel/src/disk_log.hrl").
+-include_lib("kernel/include/file.hrl").
 -record(continuation,
         {pid = self() :: pid(),
          %% We only know how to handle halt logs here, so silent dialyzer
@@ -230,7 +231,8 @@ init_stream({call, {Sender, _} = F}, {start_replication, ReqRef, Port, Opts}, Da
             eof  -> {eof, 0};
             {LOffset, ROffset} -> {LOffset, ROffset}
         end,
-    {ok, FD, FileCurOffset} = open_log(Data#data.file_name, LWalOffset0),
+    {ok, FD, FileCurOffset} =
+        open_log(Data#data.file_name, LWalOffset0),
     MonRef = erlang:monitor(process, Sender),
 
     true = init_notification_slot(Data#data.partition),
@@ -276,11 +278,13 @@ await_data(_, {timeout, TRef, file_poll_retry}, Data = #data{file_poll_tref = TR
     continue_wal_reading(Data#data{file_poll_tref = undefined});
 
 await_data(_, {timeout, TRef, port_send_retry}, Data = #data{port_retry_tref = TRef}) ->
-    logger:debug("tpc port retry: ~p~n", [Data#data.port_retry_backoff]),
+    logger:debug("tcp port retry: ~p~n", [Data#data.port_retry_backoff]),
     {ok, SN} = dc_utilities:get_stable_snapshot([include_local_dc]),
     continue_send(SN, Data#data{port_retry_tref = undefined});
 
 await_data({call, Sender}, {stop_replication}, Data) ->
+    logger:info("request to stop replication~n", []),
+
     _ = file:close(Data#data.file_desc),
     ok = logging_notification_server:delete_handler([]),
     erlang:demonitor(Data#data.mon_ref),
@@ -414,8 +418,16 @@ open_log(LogFile, WalPos) ->
             {ok, NPos} = file:position(FD, eof),
             {ok, FD, NPos - ?HEADERSZ};
         WalPos when is_integer(WalPos) ->
-            {ok, NPos} = file:position(FD, WalPos),
-            {ok, FD, NPos}
+            case file:read_file_info(FD) of
+                {ok, #file_info{size = Size}} when WalPos > Size ->
+                    logger:error("invalid wal position is provided: ~p~n", [WalPos]),
+                    {error, {invalid_wal_pos, WalPos}};
+                {ok, _} ->
+                    {ok, NPos} = file:position(FD, WalPos),
+                    {ok, FD, NPos};
+                {error, Reason} ->
+                    {error, Reason}
+            end
     end.
 
 read_ops_from_log(Data) ->
@@ -516,8 +528,9 @@ read_chunk(Fd, FileName, FPos, FBuff, Amount) ->
         {#continuation{pos = FPos1, b = Buffer1}, Terms} ->
             {ok, {FPos1, Buffer1}, Terms};
         {#continuation{}, [], _BadBytes} = R ->
-            logger:error("Bad bytes: ~p~n", [R]),
-            {error, badbytes};
+            logger:error("fpos: ~p~nbad bytes: ~p~n~p~n", [FPos, _BadBytes, R]),
+            {eof, {FPos, FBuff}, []};
+%            {error, badbytes};
         {error, _} = Error ->
             Error;
         eof ->
@@ -673,7 +686,7 @@ notify_client0(SN, [#wal_trans{materialized = none} | FinalyzedTxns],
 notify_client0(SN, [#wal_trans{txid = TxId, end_offset = EOffset} | FinalyzedTxns],
                LastSentTx, Port, LB, RB, RawValuesB)
   when EOffset < RB ->
-    logger:debug("skip transaction with commit offset: ~p~n", [EOffset]),
+    logger:info("skip transaction with commit offset: ~p~n", [EOffset]),
     notify_client0(SN, FinalyzedTxns, LastSentTx, Port,
                    remove_left_border(TxId, LB), RB, RawValuesB);
 notify_client0(SN, [#wal_trans{snapshot = TxST} | _FinalyzedTxns] = Txns, LastTxn,
@@ -698,16 +711,17 @@ notify_client0(_, [], LastTxn, _, LB, RB, _) ->
 
 notify_client1(SN, [#wal_trans{txid = TxId, dcid = DcId, snapshot = TxST,
                                materialized = TxOpsList,
-                               start_offset = _SOffset,
+                               start_offset = SOffset,
                                end_offset = EOffset
                               } | FinalyzedTxns] = Txns, LastTxn, Port, LB, RightOffset,
                RawValuesB
               ) ->
     LeftOffset = case LB of
-                     [] -> 0;
+                     [] -> SOffset;
                      [{LeftOff, _} | _] -> LeftOff
                  end,
     TxOffset = {LeftOffset, EOffset},
+    logger:debug("offset: ~p~n", [TxOffset]),
     TxOpsMaterialized = materialize_keys(RawValuesB, TxId, TxST, TxOpsList),
     %% Offset that is included with each transaction is calculated according to the following
     %% principal:

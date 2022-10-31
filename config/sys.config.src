@@ -7,7 +7,10 @@
 
       {handler, default, logger_std_h,
         #{level => debug,
-          formatter => {logger_formatter, #{single_line => false, max_size => 2048}},
+          formatter => {logger_formatter, #{single_line => false,
+                                            time_offset => "Z",
+                                            template => [time, " [", level, "] ", pid, " ", msg, "\n"],
+                                            max_size => 2048}},
           config => #{type => standard_io},
           filters => [ {no_progress, {fun logger_filters:progress/2, stop}} ]
          }
@@ -15,7 +18,9 @@
 
       {handler, debug, logger_std_h,
         #{level => info,
-          formatter => {logger_formatter, #{single_line => true, max_size => 2048}},
+          formatter => {logger_formatter, #{ single_line => true,
+                                             max_size => 2048
+                                           }},
           config => #{type => {file, "${ROOT_DIR_PREFIX}${LOGGER_DIR_PREFIX}logger_logs/info.log"}},
           filters => [ {no_progress, {fun logger_filters:progress/2, stop}} ]
          }
@@ -23,7 +28,9 @@
 
       {handler, errors, logger_std_h,
         #{level => error,
-          formatter => {logger_formatter, #{single_line => false, max_size => 2048}},
+          formatter => {logger_formatter, #{single_line => false,
+                                            max_size => 2048
+                                            }},
           config => #{type => {file, "${ROOT_DIR_PREFIX}${LOGGER_DIR_PREFIX}logger_logs/errors.log"}},
           filters => [ {no_progress, {fun logger_filters:progress/2, stop}} ]
          }
@@ -96,7 +103,7 @@
     %%                stored to disk (this is very slow in the current logging setup)
     %%        false -> all updates are sent to the operating system to be stored to disk (eventually), but are not guaranteed to be stored durably on disk
     %%                 when the reply is sent
-    {sync_log, false}
+    {sync_log, true}
 
     %% %% enable_logging:
     %%        true -> writes to disk done by the logging_vnode are enabled
