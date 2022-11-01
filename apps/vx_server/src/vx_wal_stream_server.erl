@@ -13,11 +13,9 @@
          code_change/3
         ]).
 
--record(state, { ets :: ets:tid(),
-                 workers :: [{ reference(), pid() }]
+-record(state, {
+                workers :: [{ reference(), pid() }]
                }).
-
--include("vx_wal_stream.hrl").
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -27,15 +25,7 @@ register() ->
     gen_server:call(?MODULE, {register}).
 
 init(_) ->
-   T = ets:new(wal_replication_status,
-               [set, public, named_table,
-                {read_concurrency, true},
-                {write_concurrency, true},
-                {keypos, #wal_replication_status.key}
-               ]),
-    {ok, #state{ ets = T,
-                 workers = []
-               } }.
+   {ok, #state{workers = []} }.
 
 handle_call({register}, {Pid, _}, State) ->
     case lists:keyfind(Pid, 2, State#state.workers) of

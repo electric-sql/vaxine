@@ -1,5 +1,19 @@
 -module(vx_wal_stream_multidc_SUITE).
--compile(export_all).
+
+%% common_test callbacks
+-export([
+         init_per_suite/2,
+         end_per_suite/2,
+         init_per_group/2,
+         end_per_group/2,
+         all/0,
+         groups/0
+        ]).
+
+-export([wal_replication_from_multiple_dc/1,
+         interleavings_sanity_check/1,
+         one_direction_sanity_check/1
+        ]).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -81,7 +95,8 @@ init_per_group(setup_interleavings, Config) ->
               InterleaveTxs = [ {Msg#vx_wal_txn.txid,
                                  Msg#vx_wal_txn.wal_offset
                                 } || Msg <- L0 ],
-              [{interleave, InterleaveTxs} | Config]
+              [{interleave, InterleaveTxs} | Config
+              ]
       end).
 
 end_per_group(setup_interleavings, Config) ->
@@ -113,7 +128,10 @@ interleavings_sanity_check(Config) ->
                [NextPos, length(InterleaveTxs)]),
 
     {TxId, WOffset} = lists:nth(NextPos, InterleaveTxs),
-    RestIncluded = lists:dropwhile(fun({T, _}) -> T =/= TxId  end, InterleaveTxs),
+    ct:log("StartOffset: ~p~nInterleaveTxs: ~p~n", [WOffset, InterleaveTxs]),
+
+    [_ | RestIncluded] = lists:dropwhile(fun({T, _}) -> T =/= TxId  end, InterleaveTxs),
+    ct:log("Assume to receive: ~p~n", [RestIncluded]),
 
     ?vtest:with_replication_con(Dev1,
       [{offset, WOffset}],
@@ -146,8 +164,8 @@ one_direction_sanity_check(Config) ->
               L0 = ?vtest:assert_count(
                      1, 10000,
                      fun(#vx_client_msg{msg =
-                                            #vx_wal_txn{ txid = TxId0,
-                                                         wal_offset = WalOffset0,
+                                            #vx_wal_txn{ txid = _TxId0,
+                                                         wal_offset = _WalOffset0,
                                                          ops = Ops
                                                        }}) ->
                              [ binary_to_atom(K, utf8) || {{K, _}, _, _, _} <- Ops ]

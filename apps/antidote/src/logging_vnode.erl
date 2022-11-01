@@ -61,7 +61,8 @@
     get_range/6,
     get_all/4,
     request_bucket_op_id/4,
-    request_op_id/3
+    request_op_id/3,
+    request_op_ids/2
 ]).
 
 -export([
@@ -159,7 +160,7 @@ asyn_append(IndexNode, Log, LogOperation, ReplyTo) ->
     ).
 
 %% @doc synchronous append operation payload
--spec append(index_node(), key(), log_operation()) -> {ok, op_id()} | {error, term()}.
+-spec append(index_node(), key(), log_operation()) -> {ok, op_number()} | {error, term()}.
 append(IndexNode, LogId, LogOperation) ->
     riak_core_vnode_master:sync_command(
         IndexNode,
@@ -170,7 +171,7 @@ append(IndexNode, LogId, LogOperation) ->
 
 %% @doc synchronous append operation payload
 %% If enabled in antidote.hrl will ensure item is written to disk
--spec append_commit(index_node(), key(), log_operation()) -> {ok, op_id()} | {error, term()}.
+-spec append_commit(index_node(), key(), log_operation()) -> {ok, op_number()} | {error, term()}.
 append_commit(IndexNode, LogId, Payload) ->
     riak_core_vnode_master:sync_command(
         IndexNode,
@@ -182,7 +183,7 @@ append_commit(IndexNode, LogId, Payload) ->
 %% @doc synchronous append list of log records (note a log record is a payload (log_operation) with an operation number)
 %% The IsLocal flag indicates if the operations in the transaction were handled by the local or remote DC.
 -spec append_group(index_node(), key(), [log_record()], boolean()) ->
-    {ok, op_id()} | {error, term()}.
+    {ok, op_number()} | {error, term()}.
 append_group(IndexNode, LogId, LogRecordList, IsLocal) ->
     riak_core_vnode_master:sync_command(
         IndexNode,
@@ -269,6 +270,16 @@ get_all(IndexNode, LogId, Continuation, PrevOps) ->
     ).
 
 %% @doc Gets the last id of operations stored in the log for the given DCID
+-spec request_op_ids(index_node(), partition()) -> {ok, [{dcid(), op_number()}] }.
+request_op_ids(IndexNode, Partition) ->
+    riak_core_vnode_master:sync_command(
+        IndexNode,
+        {get_op_ids, Partition},
+        ?LOGGING_MASTER,
+        infinity
+    ).
+
+%% @doc Gets the last id of operations stored in the log for the given DCID
 -spec request_op_id(index_node(), dcid(), partition()) -> {ok, non_neg_integer()}.
 request_op_id(IndexNode, DCID, Partition) ->
     riak_core_vnode_master:sync_command(
@@ -344,6 +355,14 @@ handle_command(
     OpId = get_op_id(OpIdTable, {[Partition], Bucket, DCID}),
     #op_number{local = Local, global = _Global} = OpId,
     {reply, {ok, Local}, State};
+handle_command(
+    {get_op_ids, Partition}, _Sender, State = #state{op_id_table = OpIdTable}
+) ->
+    Table = [ {DcId, OpId} || {[Part], DcId, OpId} <- get_op_numbers(OpIdTable),
+                              Part == Partition
+            ],
+    {reply, {ok, Table}, State};
+
 %% Let the log sender know the last log id that was sent so the receiving DCs
 %% don't think they are getting old messages
 handle_command({start_timer, undefined}, Sender, State) ->
@@ -488,7 +507,6 @@ handle_command(
                         true = update_ets_op_id({LogId, Bucket, MyDCID}, NewBOpId, OpIdTable),
                         NewBOpId;
                     OpType when OpType == commit ->
-                        notify_on_commit(Partition, LogOperation),
                         NewOpId;
                     _ ->
                         NewOpId
@@ -502,7 +520,7 @@ handle_command(
             case insert_log_record(Log, LogId, LogRecord, EnableLog, Sync) of
                 {ok, NewOpId} ->
                     inter_dc_log_sender_vnode:send(Partition, LogRecord),
-                    {reply, {ok, OpId}, State};
+                    {reply, {ok, NewOpId}, State};
                 {error, Reason} ->
                     {reply, {error, Reason}, State}
             end;
@@ -563,7 +581,6 @@ handle_command(
                                     {LogId, Bucket, MyDCID}, NewBOpId, OpIdTable
                                 );
                             OpType when OpType == commit ->
-                                notify_on_commit(Partition, LogOperation),
                                 true;
                             _ ->
                                 true
@@ -1382,16 +1399,6 @@ get_op_id(ClockTable, Key = {_, _, DCID}) ->
         {ok, Val} ->
             Val
     end.
-
-notify_on_commit(Partition, #log_operation{op_type = commit} = OP) ->
-    TxId = OP#log_operation.tx_id,
-    CommitPayload = OP#log_operation.log_payload,
-    logging_notification_server:notify_commit(
-      Partition, TxId,
-      CommitPayload#commit_log_payload.commit_time,
-      CommitPayload#commit_log_payload.snapshot_time
-     ).
-
 
 %%%===================================================================
 %%%  Ets tables

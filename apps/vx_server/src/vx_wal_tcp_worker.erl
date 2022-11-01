@@ -124,7 +124,10 @@ handle_vx_wal_protocol(BinaryReq, _State) ->
 handle_request(#vx_cli_req{ref = ReqRef,
                            msg = #vx_cli_start_req{opts = Opts}
                           }, State) ->
-    {ok, Pid} = vx_wal_stream:start_link([]),
+    {ok, Pid} = case State#state.wal_stream of
+                    undefined -> vx_wal_stream:start_link([]);
+                    P when is_pid(P) -> {ok, P}
+                end,
     case vx_wal_stream:start_replication(Pid, ReqRef, State#state.socket, Opts) of
         {ok, RepId} ->
             {noreply, State#state{wal_stream = Pid, rep_id = RepId}};

@@ -63,8 +63,9 @@
     read/6,
     validate_or_read/7,
     store_ss/3,
-    update/2
-]).
+    update/2,
+    bump_last_opid/3
+    ]).
 
 %% Callbacks
 -export([
@@ -85,12 +86,15 @@
     handle_overload_info/2
 ]).
 
+-export([lookup_last_applied_opid/2]).
+
 -type op_and_id() :: {non_neg_integer(), clocksi_payload()}.
 -record(state, {
     partition :: partition_id(),
     ops_cache :: cache_id(),
     snapshot_cache :: cache_id(),
-    is_ready :: boolean()
+    is_ready :: boolean(),
+    last_applied :: ets:tid() | undefined
 }).
 -type state() :: #state{}.
 %%---------------- API Functions -------------------%%
@@ -151,6 +155,15 @@ update(Key, DownstreamOp) ->
         materializer_vnode_master
     ).
 
+-spec bump_last_opid(partition_id(), dcid(), op_number()) -> ok | {error, term()}.
+bump_last_opid(Partition, DcId, OpId) ->
+    IndexNode = dc_utilities:partition_to_indexnode(Partition),
+    riak_core_vnode_master:sync_command(
+      IndexNode,
+      {bump_last_opid, DcId, OpId},
+      materializer_vnode_master
+    ).
+
 %%@doc write snapshot to cache for future read, snapshots are stored
 %%     one at a time into the ets table
 -spec store_ss(key(), materialized_snapshot(), snapshot_time()) -> ok.
@@ -165,6 +178,7 @@ store_ss(Key, Snapshot, CommitTime) ->
 init([Partition]) ->
     OpsCache = open_table(Partition, ops_cache),
     SnapshotCache = open_table(Partition, snapshot_cache),
+    LastAppliedTable = open_last_applied_table(Partition),
     IsReady =
         case application:get_env(antidote, recover_from_log) of
             {ok, true} ->
@@ -178,7 +192,8 @@ init([Partition]) ->
         is_ready = IsReady,
         partition = Partition,
         ops_cache = OpsCache,
-        snapshot_cache = SnapshotCache
+        snapshot_cache = SnapshotCache,
+        last_applied = LastAppliedTable
     }}.
 
 %% @doc The tables holding the updates and snapshots are shared with concurrent non-blocking
@@ -228,6 +243,10 @@ handle_command({read, Key, Type, SnapshotTime, TxId}, _Sender, State) ->
     {reply, read(Key, Type, SnapshotTime, TxId, [], State), State};
 handle_command({update, Key, DownstreamOp}, _Sender, State) ->
     true = op_insert_gc(Key, DownstreamOp, State),
+    {reply, ok, State};
+handle_command({bump_last_opid, DcId, OpId}, _Sender, State) ->
+    update_last_applied_table(State#state.last_applied, DcId, OpId),
+    logging_notification_server:notify_cache_update(State#state.partition, DcId, OpId),
     {reply, ok, State};
 handle_command({store_ss, Key, Snapshot, CommitTime}, _Sender, State) ->
     internal_store_ss(Key, Snapshot, CommitTime, false, State),
@@ -334,7 +353,16 @@ terminate(_Reason, _State = #state{ops_cache = OpsCache, snapshot_cache = Snapsh
 load_from_log_to_tables(Partition, State) ->
     LogId = [Partition],
     Node = {Partition, log_utilities:get_my_node(Partition)},
-    loop_until_loaded(Node, LogId, start, dict:new(), State).
+    {ok, LastOpIds} = logging_vnode:request_op_ids(Node, Partition),
+
+    case loop_until_loaded(Node, LogId, start, dict:new(), State) of
+        ok ->
+            [ update_last_applied_table(State#state.last_applied, DcId, OpId)
+              || {DcId, OpId} <- LastOpIds ],
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
 
 -spec loop_until_loaded(
     {partition_id(), node()},
@@ -822,6 +850,24 @@ open_table(Partition, Name) ->
                     ok
             end,
             open_table(Partition, Name)
+    end.
+
+open_last_applied_table(Partition) ->
+    ets:new(get_cache_name(Partition, 'last_applied_global_opid'),
+            [set, named_table, protected, ?TABLE_CONCURRENCY]).
+
+update_last_applied_table(Table, DcId, OpId) ->
+    ets:insert(Table, {DcId, OpId}).
+
+-spec lookup_last_applied_opid(partition_id(), dcid()) -> op_number() | undefined.
+lookup_last_applied_opid(Partition, DcId) ->
+    try ets:lookup(get_cache_name(Partition, 'last_applied_global_opid'), DcId) of
+        [] ->
+            undefined;
+        [{DcId, OpId}] ->
+            OpId
+    catch _:_ ->
+            undefined
     end.
 
 -spec has_ops_cache(partition_id()) -> boolean().

@@ -339,7 +339,7 @@ handle_client_msg(#start_replication{opts = Opts}, _, CliRef, State) ->
     case State#state.wal_replication of
         undefined ->
             RequireAck = proplists:get_value(sync, Opts, false),
-            Offset     = proplists:get_value(offset, Opts, none),
+            Offset     = proplists:get_value(offset, Opts, 0),
             State1     = State#state{sync_mode = RequireAck},
 
             send_request(
