@@ -1,5 +1,26 @@
 -module(vx_wal_stream_SUITE).
--compile(export_all).
+
+%% common_test callbacks
+-export([
+         init_per_suite/2,
+         end_per_suite/2,
+         init_per_group/2,
+         end_per_group/2,
+         all/0,
+         groups/0
+        ]).
+
+-export([sanity_check/1,
+         single_txn/1,
+         single_txn_from_history/1,
+         single_txn_from_history2/1,
+         single_txn_via_client/1,
+         multiple_txns_via_client/1,
+         replication_from_position/1,
+         replication_from_position_batch_api/1,
+         replication_from_eof/1,
+         interleavings_sanity_check/1
+        ]).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -267,8 +288,8 @@ replication_from_position(_Config) ->
     ?vtest:with_replication_con(
       [{offset, WalOffset}],
       fun(C1) ->
-              [Msg41, Msg51, Msg61] = ?vtest:assert_count_msg(C1, 3, 1000),
-              ?assertEqual([Msg4, Msg5, Msg6], [Msg41, Msg51, Msg61])
+              [Msg51, Msg61] = ?vtest:assert_count_msg(C1, 2, 1000),
+              ?assertEqual([Msg5, Msg6], [Msg51, Msg61])
       end).
 
 replication_from_position_batch_api(_Config) ->
@@ -323,8 +344,11 @@ interleavings_sanity_check(Config) ->
                [NextPos, length(InterleaveTxs)]),
 
     {TxId, WOffset} = lists:nth(NextPos, InterleaveTxs),
-    RestIncluded = lists:dropwhile(fun({T, _}) -> T =/= TxId  end, InterleaveTxs),
+    ct:log("StartOffset: ~p~nInterleaveTxs: ~p~n", [WOffset, InterleaveTxs]),
 
+    [_ | RestIncluded] = lists:dropwhile(fun({T, _}) -> T =/= TxId  end, InterleaveTxs),
+
+    ct:log("Assume to receive: ~p~n", [RestIncluded]),
     ?vtest:with_replication_con(
       [{offset, WOffset}],
       fun(_) ->

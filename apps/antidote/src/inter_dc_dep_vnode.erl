@@ -160,7 +160,7 @@ try_store(
         %% If so, store the transaction
         true ->
             %% Put the operations in the log
-            {ok, _} = logging_vnode:append_group(
+            {ok, OpId} = logging_vnode:append_group(
                 {Partition, node()},
                 [Partition],
                 Ops,
@@ -176,6 +176,7 @@ try_store(
             ok = lists:foreach(
                 fun(Op) -> materializer_vnode:update(Op#clocksi_payload.key, Op) end, ClockSiOps
             ),
+            ok = materializer_vnode:bump_last_opid(State#state.partition, DCID, OpId),
             {update_clock(State, DCID, Timestamp), true}
     end.
 

@@ -7,7 +7,8 @@
 -export([ start_link/0,
           add_handler/3,
           delete_handler/1,
-          notify_commit/4,
+          notify_cache_update/3,
+          lookup_last_global_id/2,
           stop/0
         ]).
 -export([ init/1,
@@ -36,14 +37,15 @@ add_handler(M, F, HandlerState) ->
 delete_handler(Args) ->
     gen_event:delete_handler(?MODULE, {?MODULE, self()}, Args).
 
-%% @doc Notify subscribers about new committed txn on the specific partition.
--spec notify_commit(antidote:partition_id(), antidote:txid(),
-                    {antidote:dcid(), antidote:clock_time()},
-                    antidote:snapshot_time()) ->
+-spec notify_cache_update(antidote:partition_id(), antidote:dcid(), antidote:op_number()) ->
           ok.
-notify_commit(Partition, TxId, CommitTime, SnapshotTime) ->
-    gen_event:sync_notify(?MODULE,
-                          {commit, [Partition, TxId, CommitTime, SnapshotTime]}).
+notify_cache_update(Partition, DcId, OpId) ->
+   gen_event:notify(?MODULE, {cache_update, [Partition, DcId, OpId]}).
+
+-spec lookup_last_global_id(antidote:partition_id(), antidote:dcid()) ->
+          antidote:op_number() | undefined.
+lookup_last_global_id(Partition, DcId) ->
+    materializer_vnode:lookup_last_applied_opid(Partition, DcId).
 
 %%------------------------------------------------------------------------------
 %% Internal functions
@@ -56,7 +58,7 @@ handle_call(Msg, State) ->
     State1 = apply_handler(Msg, State),
     {ok, _Reply = ok, State1}.
 
-handle_event({commit, Msg}, State) ->
+handle_event({cache_update, Msg}, State) ->
     try
         State1 = apply_handler(Msg, State),
         {ok, State1}
