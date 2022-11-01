@@ -21,3 +21,8 @@ Antidote is the reference platform of the [SyncFree](https://syncfree.lip6.fr/) 
 ## Community
 
 If you have any questions, please raise them on the [ElectricSQL community](https://electric-sql.com/about/community) channels.
+
+## Dependencies
+
+- Erlang >= 24.0
+- inotifywait/kqueue/fsevents depending on your OS
