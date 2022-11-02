@@ -443,10 +443,10 @@ read_ops_from_log(Data) ->
     end.
 
 read_ops_from_log(SN, #data{txns_buffer = TxNotComitted0,
-                        file_pos = FPos,
-                        file_buff = FBuff,
-                        file_desc = Fd
-                       } = Data, N) ->
+                            file_pos = FPos,
+                            file_buff = FBuff,
+                            file_desc = Fd
+                           } = Data, N) ->
     case read_ops_from_log(Fd, Data#data.file_name, FPos, FBuff) of
         %% IF we received eof here, that means we haven't read anything from the
         %% log during this call
