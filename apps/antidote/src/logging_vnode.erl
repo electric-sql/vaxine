@@ -502,7 +502,7 @@ handle_command(
             case insert_log_record(Log, LogId, LogRecord, EnableLog, Sync) of
                 {ok, NewOpId} ->
                     inter_dc_log_sender_vnode:send(Partition, LogRecord),
-                    {reply, {ok, OpId}, State};
+                    {reply, {ok, NewOpId}, State};
                 {error, Reason} ->
                     {reply, {error, Reason}, State}
             end;

@@ -8,6 +8,7 @@
           add_handler/3,
           delete_handler/1,
           notify_commit/4,
+          notify_cache_update/3,
           stop/0
         ]).
 -export([ init/1,
@@ -44,6 +45,11 @@ delete_handler(Args) ->
 notify_commit(Partition, TxId, CommitTime, SnapshotTime) ->
     gen_event:sync_notify(?MODULE,
                           {commit, [Partition, TxId, CommitTime, SnapshotTime]}).
+
+-spec notify_cache_update(antidote:partition_id(), antidote:dcid(), antidote:op_id()) ->
+          ok.
+notify_cache_update(Partition, DcId, OpId) ->
+    gen_event:notify(?MODULE, {cache_update, [Partition, DcId, OpId]}).
 
 %%------------------------------------------------------------------------------
 %% Internal functions

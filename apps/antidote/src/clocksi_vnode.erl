@@ -503,7 +503,7 @@ commit(Transaction, TxCommitTime, Updates, CommittedTx, State) ->
             LogId = log_utilities:get_logid_from_key(Key),
             Node = log_utilities:get_key_partition(Key),
             case logging_vnode:append_commit(Node, LogId, LogRecord) of
-                {ok, _} ->
+                {ok, OpId} ->
                     case update_materializer(Updates, Transaction, TxCommitTime) of
                         ok ->
                             NewPreparedDict = clean_and_notify(TxId, Updates, State),
@@ -511,6 +511,7 @@ commit(Transaction, TxCommitTime, Updates, CommittedTx, State) ->
                                                       local_dc, State#state.partition,
                                                       TxCommitTime
                                                      ),
+                            ok = notify_on_cache_update(State#state.partition, DcId, OpId),
 
                             {ok, committed, NewPreparedDict};
                         error ->
@@ -570,6 +571,9 @@ clean_prepared(PreparedTx, [{Key, _Type, _Update} | Rest], TxId) ->
                 antidote_ets_txn_caches:insert_prepared_txn_by_table(PreparedTx, Key, NewActive)
         end,
     clean_prepared(PreparedTx, Rest, TxId).
+
+notify_on_cache_update(Partition, DcId, OpId) ->
+    logging_notification_server:notify_cache_update(Partition, DcId, OpId).
 
 %% @doc converts a tuple {MegaSecs, Secs, MicroSecs} into microseconds
 now_microsec({MegaSecs, Secs, MicroSecs}) ->
