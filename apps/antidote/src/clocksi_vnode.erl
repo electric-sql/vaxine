@@ -619,7 +619,7 @@ certification_with_check(TxId, [H | T], CommittedTx, PreparedTx) ->
 check_prepared(_TxId, PreparedTx, Key) ->
     antidote_ets_txn_caches:is_prepared_txn_by_table(PreparedTx, Key).
 
--spec update_materializer(partition_id(), dcid(), op_num(), [{key(), type(), effect()}], tx(), non_neg_integer()) ->
+-spec update_materializer(partition_id(), dcid(), op_number(), [{key(), type(), effect()}], tx(), non_neg_integer()) ->
     ok | error.
 update_materializer(Partition, DcId, OpId, DownstreamOps, Transaction, TxCommitTime) ->
     ReversedDownstreamOps = lists:reverse(DownstreamOps),

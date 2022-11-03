@@ -160,7 +160,7 @@ asyn_append(IndexNode, Log, LogOperation, ReplyTo) ->
     ).
 
 %% @doc synchronous append operation payload
--spec append(index_node(), key(), log_operation()) -> {ok, op_id()} | {error, term()}.
+-spec append(index_node(), key(), log_operation()) -> {ok, op_number()} | {error, term()}.
 append(IndexNode, LogId, LogOperation) ->
     riak_core_vnode_master:sync_command(
         IndexNode,
@@ -171,7 +171,7 @@ append(IndexNode, LogId, LogOperation) ->
 
 %% @doc synchronous append operation payload
 %% If enabled in antidote.hrl will ensure item is written to disk
--spec append_commit(index_node(), key(), log_operation()) -> {ok, op_id()} | {error, term()}.
+-spec append_commit(index_node(), key(), log_operation()) -> {ok, op_number()} | {error, term()}.
 append_commit(IndexNode, LogId, Payload) ->
     riak_core_vnode_master:sync_command(
         IndexNode,
@@ -183,7 +183,7 @@ append_commit(IndexNode, LogId, Payload) ->
 %% @doc synchronous append list of log records (note a log record is a payload (log_operation) with an operation number)
 %% The IsLocal flag indicates if the operations in the transaction were handled by the local or remote DC.
 -spec append_group(index_node(), key(), [log_record()], boolean()) ->
-    {ok, op_id()} | {error, term()}.
+    {ok, op_number()} | {error, term()}.
 append_group(IndexNode, LogId, LogRecordList, IsLocal) ->
     riak_core_vnode_master:sync_command(
         IndexNode,
@@ -270,7 +270,7 @@ get_all(IndexNode, LogId, Continuation, PrevOps) ->
     ).
 
 %% @doc Gets the last id of operations stored in the log for the given DCID
--spec request_op_ids(index_node(), partition()) -> {ok, [{dcid(), op_id()}] }.
+-spec request_op_ids(index_node(), partition()) -> {ok, [{dcid(), op_number()}] }.
 request_op_ids(IndexNode, Partition) ->
     riak_core_vnode_master:sync_command(
         IndexNode,

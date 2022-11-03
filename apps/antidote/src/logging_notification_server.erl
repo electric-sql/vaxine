@@ -37,13 +37,13 @@ add_handler(M, F, HandlerState) ->
 delete_handler(Args) ->
     gen_event:delete_handler(?MODULE, {?MODULE, self()}, Args).
 
--spec notify_cache_update(antidote:partition_id(), antidote:dcid(), antidote:op_id()) ->
+-spec notify_cache_update(antidote:partition_id(), antidote:dcid(), antidote:op_number()) ->
           ok.
 notify_cache_update(Partition, DcId, OpId) ->
    gen_event:notify(?MODULE, {cache_update, [Partition, DcId, OpId]}).
 
 -spec lookup_last_global_id(antidote:partition_id(), antidote:dcid()) ->
-          antidote:op_id() | undefined.
+          antidote:op_number() | undefined.
 lookup_last_global_id(Partition, DcId) ->
     materializer_vnode:lookup_last_applied_opid(Partition, DcId).
 

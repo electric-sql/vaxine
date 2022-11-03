@@ -155,7 +155,7 @@ update(Key, DownstreamOp) ->
         materializer_vnode_master
     ).
 
--spec bump_last_opid(partition_id(), dcid(), op_id()) -> ok | {error, term()}.
+-spec bump_last_opid(partition_id(), dcid(), op_number()) -> ok | {error, term()}.
 bump_last_opid(Partition, DcId, OpId) ->
     IndexNode = dc_utilities:partition_to_indexnode(Partition),
     riak_core_vnode_master:sync_command(
@@ -859,7 +859,7 @@ open_last_applied_table(Partition) ->
 update_last_applied_table(Table, DcId, OpId) ->
     ets:insert(Table, {DcId, OpId}).
 
--spec lookup_last_applied_opid(partition_id(), dcid()) -> op_id() | undefined.
+-spec lookup_last_applied_opid(partition_id(), dcid()) -> op_number() | undefined.
 lookup_last_applied_opid(Partition, DcId) ->
     try ets:lookup(get_cache_name(Partition, 'last_applied_global_opid'), DcId) of
         [] ->
