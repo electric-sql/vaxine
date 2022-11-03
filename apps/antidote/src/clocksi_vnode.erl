@@ -504,14 +504,15 @@ commit(Transaction, TxCommitTime, Updates, CommittedTx, State) ->
             Node = log_utilities:get_key_partition(Key),
             case logging_vnode:append_commit(Node, LogId, LogRecord) of
                 {ok, OpId} ->
-                    case update_materializer(Updates, Transaction, TxCommitTime) of
+                    case update_materializer(
+                           State#state.partition, DcId, OpId,
+                           Updates, Transaction, TxCommitTime) of
                         ok ->
                             NewPreparedDict = clean_and_notify(TxId, Updates, State),
                             meta_data_sender:put_meta(stable_time_functions,
                                                       local_dc, State#state.partition,
                                                       TxCommitTime
                                                      ),
-                            ok = notify_on_cache_update(State#state.partition, DcId, OpId),
 
                             {ok, committed, NewPreparedDict};
                         error ->
@@ -621,10 +622,9 @@ certification_with_check(TxId, [H | T], CommittedTx, PreparedTx) ->
 check_prepared(_TxId, PreparedTx, Key) ->
     antidote_ets_txn_caches:is_prepared_txn_by_table(PreparedTx, Key).
 
--spec update_materializer([{key(), type(), effect()}], tx(), non_neg_integer()) ->
+-spec update_materializer(partition_id(), dcid(), non_neg_integer(), [{key(), type(), effect()}], tx(), non_neg_integer()) ->
     ok | error.
-update_materializer(DownstreamOps, Transaction, TxCommitTime) ->
-    DcId = dc_utilities:get_my_dc_id(),
+update_materializer(Partition, DcId, OpId, DownstreamOps, Transaction, TxCommitTime) ->
     ReversedDownstreamOps = lists:reverse(DownstreamOps),
     UpdateFunction = fun({Key, Type, Op}, AccIn) ->
         CommittedDownstreamOp =
@@ -642,6 +642,7 @@ update_materializer(DownstreamOps, Transaction, TxCommitTime) ->
     Failures = lists:filter(fun(Elem) -> Elem /= ok end, Results),
     case Failures of
         [] ->
+            materializer_vnode:bump_last_opid(Partition, DcId, OpId),
             ok;
         _ ->
             error

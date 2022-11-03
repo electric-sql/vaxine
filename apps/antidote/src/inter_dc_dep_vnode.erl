@@ -176,7 +176,7 @@ try_store(
             ok = lists:foreach(
                 fun(Op) -> materializer_vnode:update(Op#clocksi_payload.key, Op) end, ClockSiOps
             ),
-            ok = logging_notification_server:notify_cache_update(State#state.partition, DCID, OpId),
+            ok = materializer_vnode:bump_last_opid(State#state.partition, DCID, OpId),
             {update_clock(State, DCID, Timestamp), true}
     end.
 

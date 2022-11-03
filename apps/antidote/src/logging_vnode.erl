@@ -61,7 +61,8 @@
     get_range/6,
     get_all/4,
     request_bucket_op_id/4,
-    request_op_id/3
+    request_op_id/3,
+    request_op_ids/2
 ]).
 
 -export([
@@ -269,6 +270,16 @@ get_all(IndexNode, LogId, Continuation, PrevOps) ->
     ).
 
 %% @doc Gets the last id of operations stored in the log for the given DCID
+-spec request_op_ids(index_node(), partition()) -> {ok, [{dcid(), non_neg_integer()}] }.
+request_op_ids(IndexNode, Partition) ->
+    riak_core_vnode_master:sync_command(
+        IndexNode,
+        {get_op_ids, Partition},
+        ?LOGGING_MASTER,
+        infinity
+    ).
+
+%% @doc Gets the last id of operations stored in the log for the given DCID
 -spec request_op_id(index_node(), dcid(), partition()) -> {ok, non_neg_integer()}.
 request_op_id(IndexNode, DCID, Partition) ->
     riak_core_vnode_master:sync_command(
@@ -344,6 +355,15 @@ handle_command(
     OpId = get_op_id(OpIdTable, {[Partition], Bucket, DCID}),
     #op_number{local = Local, global = _Global} = OpId,
     {reply, {ok, Local}, State};
+handle_command(
+    {get_op_ids, Partition}, _Sender, State = #state{op_id_table = OpIdTable}
+) ->
+    Table = [ {DcId, Global} || {{Part, DcId}, #op_number{global = Global}}
+                                    <- get_op_numbers(OpIdTable),
+                                Part == Partition
+            ],
+    {reply, {ok, Table}, State};
+
 %% Let the log sender know the last log id that was sent so the receiving DCs
 %% don't think they are getting old messages
 handle_command({start_timer, undefined}, Sender, State) ->

@@ -1,10 +1,9 @@
 -module(vx_wal_stream_2).
 -behaviour(gen_statem).
 
--export([ start_link/1,
-          start_replication/4,
-          stop_replication/1,
-          notify_commit/5
+-export([ start_link/1
+          %start_replication/4,
+          %stop_replication/1
         ]).
 
 -export([ init/1,
@@ -12,10 +11,10 @@
           terminate/3
         ]).
 
--export([ init_stream/3,
-          await_client/3,
-          await_wal/3,
-          await_materializer/3
+-export([ init_stream/3 %,
+          %await_client/3,
+          %await_wal/3,
+          %await_materializer/3
         ]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
@@ -41,16 +40,18 @@
           %% commit timestamp of the transaction
           snapshot = none :: antidote:snapshot_time() | none,
           %% Materialized is left with none for aborted transactions
-          materialized = none :: list() | none
+          materialized = none :: list() | none,
+          global_opid :: non_neg_integer()
         }).
 
 -record(txn_iter, { last_commit_offset :: vx_wal_utils:file_offset(),
                     last_tx_id :: antidote:txid() | undefined,
                     not_comitted_offsets = [] ::
                       orddict:orddict(non_neg_integer(), txid()),
-                    not_comitted_txns = #{} :: txns_noncommitted_map(),
+                    not_comitted_txns = #{} :: txns_noncomitted_map(),
                     comitted_txns = []
                   }).
+-type txn_iter() :: #txn_iter{}.
 
 -record(data, {
                client_pid :: pid() | undefined,
@@ -79,6 +80,68 @@
                              vx_wals_utils:file_offset(),
                              term() }
                          ].
+
+%%----------------
+
+-spec start_link(list()) -> {ok, pid()} | ignore | {error, term()}.
+start_link(Args) ->
+    gen_statem:start_link(?MODULE, Args, []).
+
+%% @doc Callback for notification of vx_wal_stream about committed transactions.
+%% Current logic would only notify the process with cast message if the status
+%% is set to ready.
+-spec notify_cache_update(pid(), antidote:partition_id(), antidote:dcid(),
+                          antidote:op_id()) ->
+          ok.
+notify_cache_update(Pid, Partition, DcId, #op_number{global = OpId}) ->
+    try
+        logger:debug("cache update notification ~p~n~p~n",
+                    [[Partition, DcId, OpId]]),
+        true = ets:update_element(wal_replication_status, {Partition, DcId, Pid},
+                                  { #wal_replication_status.txdata, OpId }
+                                 ),
+        RFun = ets:fun2ms(
+                 fun(#wal_replication_status{key = {Partition0, DcId0, Pid0},
+                                             notification = ready
+                                            } = W)
+                    when Partition0 == Partition,
+                         DcId0 == DcId,
+                         Pid0 == Pid->
+                         W#wal_replication_status{notification = sent}
+                 end),
+
+        case ets:select_replace(wal_replication_status, RFun) of
+            0 -> ok;
+            1 ->
+                Pid ! { partition = Partition },
+                ok
+        end
+    catch T:E:S ->
+            logger:error("Notification failed ~p:~p stack: ~p~n", [T, E, S]),
+            ok
+    end.
+
+%% internal usage only
+
+lookup_last_cache_global_opid(Partition, DcId) ->
+    logging_notification_server:lookup_last_global_id(Partition, DcId).
+
+init_notification_slot(Partition) ->
+    logger:info("Init notification slot for partition ~p~n", [Partition]),
+    ets:insert(wal_replication_status,
+               #wal_replication_status{key = {Partition, self()},
+                                       notification = ready
+                                      }).
+
+-spec mark_as_ready_for_notification(antidote:partition_id()) -> ok.
+mark_as_ready_for_notification(Partition) ->
+    logger:debug("Mark as ready to continue wal streaming: ~p~n", [Partition]),
+    true = ets:update_element(wal_replication_status, {Partition, self()},
+                              [{#wal_replication_status.notification, ready}]),
+    ok.
+
+%%----------------
+
 
 callback_mode() ->
     state_functions.
@@ -110,7 +173,7 @@ init_stream({call, {Sender, _} = F}, {start_replication, ReqRef, Port, Opts}, Da
 
     true = init_notification_slot(Data#data.partition),
     ok = logging_notification_server:add_handler(
-           ?MODULE, notify_commit, [self()]),
+           ?MODULE, notify_cache_update, [self()]),
 
     ReplicationRef = make_ref(),
     ok = vx_wal_tcp_worker:send_start(Port, ReqRef, ReplicationRef),
@@ -132,7 +195,7 @@ init_stream(Type, Msg, Data) ->
     common_callback(Type, Msg, Data).
 
 stream_catchup(internal, continue_stream, Data) ->
-    continue_wal_reading(Data).
+    consume_ops_from_wal(Data).
 
 common_callback(info, {gen_event_EXIT, _Handler, _Reason}, Data) ->
     {keep_state, Data};
@@ -163,11 +226,11 @@ consume_ops_from_wal(TxnIter, WalInfo, Data) ->
         {ok, Acc1, Wal1} -> %% We reached end of WAL log
             ok;
         {stop, Acc1, Wal1} -> %% There is data to send
-            case notify_client(Port, Acc1#txn_iter.comitted_txns,
+            case notify_client(Data#data.port, Acc1#txn_iter.comitted_txns,
                                Data#data.send_raw_values)
             of
                 {continue, _} ->
-                    consume_ops_from_wal(   );
+                    ok;%%consume_ops_from_wal(   );
                 {client_stop, LastProcessedTxn, ComittedTxns, NotComittedBorders} ->
                     %% Poll the client, or wait for async confirmation
                     ok;
@@ -212,14 +275,14 @@ filter_fun(#wal_trans{}, _) ->
     false.
 
 
-notify_client(Comitted) ->
-    try notify_client0(Port, Comitted)
-    of
-        {ok} ->
-            ok
-    end.
-
-% FIXME: RIGHT_OFFSET THAT WE USE OT IGNORE TRANSACTIONS SHOULD BE SET WHEN START REPLICATION
+notify_client(Port, Comitted, RawValues) ->
+    %% try notify_client0(Port, Comitted, RawValues) of
+    %%     {ok} ->
+    %%         ok
+    %% catch _:_ ->
+    %%         ok
+    %% end.
+    ok.
 
 notify_client0([#wal_trans{materialized = none} | FinalyzedTxns],
                LastSentTx, Port, LB, RB, RawValuesB) ->
@@ -233,10 +296,10 @@ notify_client0([#wal_trans{txid = TxId, end_offset = EOffset} | FinalyzedTxns],
 notify_client0([#wal_trans{} = Tx | FinalizedTxns] = Txns, LastTxn,
                Port, LB, RightOffset, RawValuesB) ->
     %% FIXME: We have a general assumption here, that transactions in the WAL
-    %% log are sorted according to snapshot order, which is not the case in current
-    %% wal implementation. This should not cause issues in single partition case
-    %% though.
-    case is_materialization_ready(Tx) of
+    %% log are sorted according to snapshot order, which is not the case in
+    %% current wal implementation. This should not cause issues in single
+    %% partition case though.
+    case is_materialization_ready(0, Tx) of
         true ->
             case notify_client1(Tx, Port, LB, RawValuesB) of
                 ok ->
@@ -282,14 +345,36 @@ notify_client1(#wal_trans{txid = TxId, dcid = DcId, snapshot = TxST,
             {error, Reason}
     end.
 
-is_materialization_ready(_Txn = #wal_trans{snapshot = TxST}) ->
-    try vectorclock:get(SN, TxST) of
-        true ->
-            true;
+is_materialization_ready(Partition, Txn = #wal_trans{snapshot = TxST,
+                                                     dcid = DcId,
+                                                     global_opid = OpId
+                                                    }) ->
+    SN = get_stable_snapshot(),
+    case compare_snapshot(SN, TxST) of
+        true -> true;
         false ->
-            false
+            GId = lookup_last_cache_global_opid(Partition, DcId),
+            case OpId =< GId of
+                true -> true;
+                false -> {false, TxST, DcId, OpId}
+            end
+    end.
+
+compare_snapshot(SN, TxST) ->
+    try vectorclock:ge(SN, TxST) of
+        Bool -> Bool
     catch _:_ ->
             false
+    end.
+
+get_stable_snapshot() ->
+    case get(stable_snapshot) of
+        undefined ->
+            {ok, SN} = dc_utilities:get_stable_snapshot(),
+            put(stable_snapshot, SN),
+            SN;
+        SN ->
+            SN
     end.
 
 materialize_keys(_, _, _, []) -> [];
@@ -344,15 +429,15 @@ process_txns([], NotComitted, FinalizedTxns, _, LastTxId, NotComittedBorders) ->
 
 process_txns([{_, LogRecord} | Rest], NotComitted, FinalizedTxns0, TxOffset,
              LastTxId, NotComittedBorders) ->
-    #log_record{log_operation = LogOperation} =
+    #log_record{log_operation = LogOperation, op_number = OpId} =
         log_utilities:check_log_record_version(LogRecord),
 
     {NotComitted1, FinalizedTxns1, NotComittedBorders1} =
-        process_op0(LogOperation, NotComitted, FinalizedTxns0, TxOffset, NotComittedBorders),
+        process_op0(LogOperation, NotComitted, FinalizedTxns0, TxOffset, NotComittedBorders, OpId),
     process_txns(Rest, NotComitted1, FinalizedTxns1, TxOffset, LastTxId, NotComittedBorders1).
 
 process_op0(#log_operation{op_type = OpType, tx_id = TxId, log_payload = Payload},
-           RemainingOps, FinalizedTxns, TxOffset, NotComittedBorders)
+           RemainingOps, FinalizedTxns, TxOffset, NotComittedBorders, _OpId)
   when OpType == update_start ->
     {Key, Type, Op} = { Payload#update_log_payload.key,
                         Payload#update_log_payload.type,
@@ -364,18 +449,18 @@ process_op0(#log_operation{op_type = OpType, tx_id = TxId, log_payload = Payload
     {RemainingOps1, FinalizedTxns, NotComittedBorders1};
 
 process_op0(LogOp = #log_operation{tx_id = TxId}, RemainingOps, FinalizedTxns, TxOffset,
-           NotComittedBorders) ->
+           NotComittedBorders, OpId) ->
     case RemainingOps of
         #{ TxId := _ } ->
             {RemainingOps1, FinalizedTxns1} =
-                process_op1(LogOp, RemainingOps, FinalizedTxns, TxOffset),
+                process_op1(LogOp, RemainingOps, FinalizedTxns, TxOffset, OpId),
             {RemainingOps1, FinalizedTxns1, NotComittedBorders};
         _ ->
             {RemainingOps, FinalizedTxns, NotComittedBorders}
     end.
 
 process_op1(#log_operation{op_type = OpType, tx_id = TxId, log_payload = Payload},
-           RemainingOps, FinalizedTxns, _TxOffset)
+           RemainingOps, FinalizedTxns, _TxOffset, _OpId)
   when OpType == update ->
     {Key, Type, Op} = { Payload#update_log_payload.key,
                         Payload#update_log_payload.type,
@@ -386,9 +471,9 @@ process_op1(#log_operation{op_type = OpType, tx_id = TxId, log_payload = Payload
                                                {Offset, [{Key, Type, Op} | Ops]}
                                        end, RemainingOps),
     {RemainingOps1, FinalizedTxns};
-process_op1(#log_operation{op_type = prepare}, RemainingOps, FinalizedTxns, _TxPrepareOffset) ->
+process_op1(#log_operation{op_type = prepare}, RemainingOps, FinalizedTxns, _TxPrepareOffset, _) ->
     {RemainingOps, FinalizedTxns};
-process_op1(#log_operation{op_type = abort, tx_id = TxId}, RemainingOps, FinalizedTxns, TxAbortOffset) ->
+process_op1(#log_operation{op_type = abort, tx_id = TxId}, RemainingOps, FinalizedTxns, TxAbortOffset, _) ->
     case maps:take(TxId, RemainingOps) of
         {{TxStartOffset, _}, RemainingOps1} ->
             { RemainingOps1,
@@ -398,7 +483,7 @@ process_op1(#log_operation{op_type = abort, tx_id = TxId}, RemainingOps, Finaliz
             {RemainingOps, FinalizedTxns}
     end;
 process_op1(#log_operation{op_type = commit, tx_id = TxId, log_payload = Payload},
-           RemainingOps, FinalizedTxns, TxCommitOffset) ->
+           RemainingOps, FinalizedTxns, TxCommitOffset, OpId) ->
     #commit_log_payload{commit_time = {DcId, TxCommitTime},
                         snapshot_time = ST
                        } = Payload,
@@ -410,7 +495,9 @@ process_op1(#log_operation{op_type = commit, tx_id = TxId, log_payload = Payload
             {RemainingOps1,
              [prepare_txn_comitted(TxId, TxST, DcId,
                                    TxStartOffset, TxCommitOffset,
-                                   lists:reverse(TxOpsList))
+                                   lists:reverse(TxOpsList),
+                                   OpId
+                                  )
              | FinalizedTxns]
             };
         error ->
@@ -418,7 +505,7 @@ process_op1(#log_operation{op_type = commit, tx_id = TxId, log_payload = Payload
             {RemainingOps, FinalizedTxns}
     end.
 
-prepare_txn_comitted(TxId, TxST, DcId, TxStartOffset, TxCommitOffset, TxOpsList0) ->
+prepare_txn_comitted(TxId, TxST, DcId, TxStartOffset, TxCommitOffset, TxOpsList0, OpId) ->
     logger:info("processed txn:~n ~p ~p:~p~n",
                 [TxId, TxStartOffset, TxCommitOffset]),
 
@@ -427,7 +514,8 @@ prepare_txn_comitted(TxId, TxST, DcId, TxStartOffset, TxCommitOffset, TxOpsList0
                 snapshot = TxST,
                 end_offset = TxCommitOffset,
                 start_offset = TxStartOffset,
-                materialized = TxOpsList0
+                materialized = TxOpsList0,
+                global_opid = OpId#op_number.global
               }.
 
 prepare_txn_aborted(TxId, TxStartOffset, TxAbortOffset) ->
@@ -446,3 +534,12 @@ add_left_border(TxOffset, TxId, OrdDict) ->
 
 remove_left_border(TxId, OrdDict) ->
     lists:keydelete(TxId, 2, OrdDict).
+
+maybe_cancel_timer(undefined) -> ok;
+maybe_cancel_timer(Ref) ->
+    erlang:cancel_timer(Ref).
+
+maybe_close_file(undefined) ->
+    ok;
+maybe_close_file(Fd) ->
+    catch file:close(Fd).
