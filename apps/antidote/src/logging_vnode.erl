@@ -270,7 +270,7 @@ get_all(IndexNode, LogId, Continuation, PrevOps) ->
     ).
 
 %% @doc Gets the last id of operations stored in the log for the given DCID
--spec request_op_ids(index_node(), partition()) -> {ok, [{dcid(), non_neg_integer()}] }.
+-spec request_op_ids(index_node(), partition()) -> {ok, [{dcid(), op_id()}] }.
 request_op_ids(IndexNode, Partition) ->
     riak_core_vnode_master:sync_command(
         IndexNode,
@@ -358,9 +358,8 @@ handle_command(
 handle_command(
     {get_op_ids, Partition}, _Sender, State = #state{op_id_table = OpIdTable}
 ) ->
-    Table = [ {DcId, Global} || {{Part, DcId}, #op_number{global = Global}}
-                                    <- get_op_numbers(OpIdTable),
-                                Part == Partition
+    Table = [ {DcId, OpId} || {[Part], DcId, OpId} <- get_op_numbers(OpIdTable),
+                              Part == Partition
             ],
     {reply, {ok, Table}, State};
 
@@ -508,7 +507,7 @@ handle_command(
                         true = update_ets_op_id({LogId, Bucket, MyDCID}, NewBOpId, OpIdTable),
                         NewBOpId;
                     OpType when OpType == commit ->
-                        notify_on_commit(Partition, LogOperation),
+                        %% notify_on_commit(Partition, LogOperation),
                         NewOpId;
                     _ ->
                         NewOpId
@@ -583,7 +582,7 @@ handle_command(
                                     {LogId, Bucket, MyDCID}, NewBOpId, OpIdTable
                                 );
                             OpType when OpType == commit ->
-                                notify_on_commit(Partition, LogOperation),
+                                %% notify_on_commit(Partition, LogOperation),
                                 true;
                             _ ->
                                 true
@@ -1403,14 +1402,14 @@ get_op_id(ClockTable, Key = {_, _, DCID}) ->
             Val
     end.
 
-notify_on_commit(Partition, #log_operation{op_type = commit} = OP) ->
-    TxId = OP#log_operation.tx_id,
-    CommitPayload = OP#log_operation.log_payload,
-    logging_notification_server:notify_commit(
-      Partition, TxId,
-      CommitPayload#commit_log_payload.commit_time,
-      CommitPayload#commit_log_payload.snapshot_time
-     ).
+%% notify_on_commit(Partition, #log_operation{op_type = commit} = OP) ->
+%%     TxId = OP#log_operation.tx_id,
+%%     CommitPayload = OP#log_operation.log_payload,
+%%     logging_notification_server:notify_commit(
+%%       Partition, TxId,
+%%       CommitPayload#commit_log_payload.commit_time,
+%%       CommitPayload#commit_log_payload.snapshot_time
+%%      ).
 
 
 %%%===================================================================

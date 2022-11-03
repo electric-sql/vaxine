@@ -573,9 +573,6 @@ clean_prepared(PreparedTx, [{Key, _Type, _Update} | Rest], TxId) ->
         end,
     clean_prepared(PreparedTx, Rest, TxId).
 
-notify_on_cache_update(Partition, DcId, OpId) ->
-    logging_notification_server:notify_cache_update(Partition, DcId, OpId).
-
 %% @doc converts a tuple {MegaSecs, Secs, MicroSecs} into microseconds
 now_microsec({MegaSecs, Secs, MicroSecs}) ->
     (MegaSecs * 1000000 + Secs) * 1000000 + MicroSecs.
@@ -622,7 +619,7 @@ certification_with_check(TxId, [H | T], CommittedTx, PreparedTx) ->
 check_prepared(_TxId, PreparedTx, Key) ->
     antidote_ets_txn_caches:is_prepared_txn_by_table(PreparedTx, Key).
 
--spec update_materializer(partition_id(), dcid(), non_neg_integer(), [{key(), type(), effect()}], tx(), non_neg_integer()) ->
+-spec update_materializer(partition_id(), dcid(), op_num(), [{key(), type(), effect()}], tx(), non_neg_integer()) ->
     ok | error.
 update_materializer(Partition, DcId, OpId, DownstreamOps, Transaction, TxCommitTime) ->
     ReversedDownstreamOps = lists:reverse(DownstreamOps),
@@ -642,7 +639,7 @@ update_materializer(Partition, DcId, OpId, DownstreamOps, Transaction, TxCommitT
     Failures = lists:filter(fun(Elem) -> Elem /= ok end, Results),
     case Failures of
         [] ->
-            materializer_vnode:bump_last_opid(Partition, DcId, OpId),
+            ok = materializer_vnode:bump_last_opid(Partition, DcId, OpId),
             ok;
         _ ->
             error

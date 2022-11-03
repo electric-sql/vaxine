@@ -1,9 +1,10 @@
 -module(vx_wal_stream_2).
 -behaviour(gen_statem).
 
--export([ start_link/1
-          %start_replication/4,
-          %stop_replication/1
+-export([ start_link/1,
+          start_replication/4,
+          stop_replication/1,
+          notify_cache_update/4
         ]).
 
 -export([ init/1,
@@ -11,10 +12,10 @@
           terminate/3
         ]).
 
--export([ init_stream/3 %,
-          %await_client/3,
-          %await_wal/3,
-          %await_materializer/3
+-export([ init_stream/3,
+          stream_catchup/3,
+          await_cache/3,
+          await_client/3
         ]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
@@ -41,7 +42,7 @@
           snapshot = none :: antidote:snapshot_time() | none,
           %% Materialized is left with none for aborted transactions
           materialized = none :: list() | none,
-          global_opid :: non_neg_integer()
+          global_opid :: non_neg_integer() | undefined
         }).
 
 -record(txn_iter, { last_commit_offset :: vx_wal_utils:file_offset(),
@@ -54,10 +55,12 @@
 -type txn_iter() :: #txn_iter{}.
 
 -record(data, {
+               await_cache :: {antidote:dcid(), non_neg_integer()} | any | undefined,
+
                client_pid :: pid() | undefined,
                client_mon_ref :: reference() | undefined,
 
-               txn_iter :: txn_iter(),
+               txn_iter :: txn_iter() | undefined,
 
                partition :: antidote:partition_id(),
                port :: port() | undefined,
@@ -70,16 +73,17 @@
               }).
 
 -type txns_noncomitted_map() :: #{antidote:txid() =>
-                                      { vx_wals_utils:file_offset(),
+                                      { vx_wal_utils:file_offset(),
                                         [any_log_payload()]
                                       }
                                  }.
 -type txns_comitted() :: [ { antidote:txid(),
                              antidote:dcid(),
                              antidote:clock_time(),
-                             vx_wals_utils:file_offset(),
+                             vx_wal_utils:file_offset(),
                              term() }
                          ].
+-type wal_offset() :: {vx_wal_utils:file_offset(), vx_wal_utils:file_offset()}.
 
 %%----------------
 
@@ -87,61 +91,32 @@
 start_link(Args) ->
     gen_statem:start_link(?MODULE, Args, []).
 
+%% @doc Starts replication, Port is expected to be a tcp port, opened by
+%% vx_wal_tcp_worker.
+-spec start_replication(pid(), reference(), port(),
+                        [{offset, 0 | eof | wal_offset()} |
+                         {raw_values, true | false}
+                        ]) ->
+          {ok, reference()} | {error, term()}.
+start_replication(Pid, ReqRef, Port, RepOpts) ->
+    gen_statem:call(Pid, {start_replication, ReqRef, Port, RepOpts}, infinity).
+
+%% @doc Ask vx_wal_stream to stop replicating of the data.
+-spec stop_replication(pid()) -> ok | {error, term()}.
+stop_replication(Pid) ->
+    gen_statem:call(Pid, {stop_replication}).
+
 %% @doc Callback for notification of vx_wal_stream about committed transactions.
 %% Current logic would only notify the process with cast message if the status
 %% is set to ready.
 -spec notify_cache_update(pid(), antidote:partition_id(), antidote:dcid(),
-                          antidote:op_id()) ->
+                          antidote:op_num()) ->
           ok.
 notify_cache_update(Pid, Partition, DcId, #op_number{global = OpId}) ->
-    try
-        logger:debug("cache update notification ~p~n~p~n",
+    logger:debug("cache update notification ~p~n~p~n",
                     [[Partition, DcId, OpId]]),
-        true = ets:update_element(wal_replication_status, {Partition, DcId, Pid},
-                                  { #wal_replication_status.txdata, OpId }
-                                 ),
-        RFun = ets:fun2ms(
-                 fun(#wal_replication_status{key = {Partition0, DcId0, Pid0},
-                                             notification = ready
-                                            } = W)
-                    when Partition0 == Partition,
-                         DcId0 == DcId,
-                         Pid0 == Pid->
-                         W#wal_replication_status{notification = sent}
-                 end),
-
-        case ets:select_replace(wal_replication_status, RFun) of
-            0 -> ok;
-            1 ->
-                Pid ! { partition = Partition },
-                ok
-        end
-    catch T:E:S ->
-            logger:error("Notification failed ~p:~p stack: ~p~n", [T, E, S]),
-            ok
-    end.
-
-%% internal usage only
-
-lookup_last_cache_global_opid(Partition, DcId) ->
-    logging_notification_server:lookup_last_global_id(Partition, DcId).
-
-init_notification_slot(Partition) ->
-    logger:info("Init notification slot for partition ~p~n", [Partition]),
-    ets:insert(wal_replication_status,
-               #wal_replication_status{key = {Partition, self()},
-                                       notification = ready
-                                      }).
-
--spec mark_as_ready_for_notification(antidote:partition_id()) -> ok.
-mark_as_ready_for_notification(Partition) ->
-    logger:debug("Mark as ready to continue wal streaming: ~p~n", [Partition]),
-    true = ets:update_element(wal_replication_status, {Partition, self()},
-                              [{#wal_replication_status.notification, ready}]),
+    Pid ! {cache, DcId, OpId},
     ok.
-
-%%----------------
-
 
 callback_mode() ->
     state_functions.
@@ -168,10 +143,8 @@ init_stream({call, {Sender, _} = F}, {start_replication, ReqRef, Port, Opts}, Da
                                           proplists:get_value(offset, Opts, 0)
                                          ),
     {ok, WalState} = vx_wal_utils:open_wal(LogFile, Lsn),
-
     MonRef = erlang:monitor(process, Sender),
 
-    true = init_notification_slot(Data#data.partition),
     ok = logging_notification_server:add_handler(
            ?MODULE, notify_cache_update, [self()]),
 
@@ -197,6 +170,35 @@ init_stream(Type, Msg, Data) ->
 stream_catchup(internal, continue_stream, Data) ->
     consume_ops_from_wal(Data).
 
+await_cache(info, {cache, _DcId, _OpId}, #data{await_cache = any} = Data) ->
+    consume_ops_from_wal(Data);
+await_cache(info, {cache, DcId, OpId1}, #data{await_cache = {DcId, OpId2}} = Data) ->
+    case OpId1 >= OpId2 of
+        true ->
+            continue_client_stream(Data#data.txn_iter, Data#data.wal_info,
+                                   Data#data{await_cache = any}
+                                  );
+        false ->
+            keep_state_and_data
+    end;
+await_cache(info, {cache, _DcId, _OpId}, _Data) ->
+    keep_state_and_data;
+await_cache(Type, Msg, Data) ->
+    common_callback(Type, Msg, Data).
+
+await_client(info, {cache, _, _}, _Data) ->
+    keep_state_and_data;
+await_client(info, {timeout, TRef, port_send_retry}, Data = #data{port_retry_tref = TRef}) ->
+    logger:debug("tcp port retry: ~p~n", [Data#data.port_retry_backoff]),
+    continue_client_stream(Data#data.txn_iter, Data#data.wal_info,
+                                   Data#data{await_cache = any}
+                                  );
+await_client(Type, Msg, Data) ->
+    common_callback(Type, Msg, Data).
+
+common_callback(info, {'DOWN', _Mref, process, Pid, _}, #data{client_pid = Pid} = Data) ->
+    {stop, normal, Data};
+
 common_callback(info, {gen_event_EXIT, _Handler, _Reason}, Data) ->
     {keep_state, Data};
 
@@ -212,7 +214,6 @@ terminate(_Reason, _SN, #data{} = Data) ->
     _ = maybe_close_file(Data#data.wal_info),
     ok.
 
-
 %%------------------------------------------------------------------------------
 
 consume_ops_from_wal(#data{wal_info = Wal} = Data) ->
@@ -223,23 +224,38 @@ consume_ops_from_wal(#data{wal_info = Wal} = Data) ->
 
 consume_ops_from_wal(TxnIter, WalInfo, Data) ->
     case vx_wal_utils:read_ops_from_log(fun process_ops/3, TxnIter, WalInfo) of
-        {ok, Acc1, Wal1} -> %% We reached end of WAL log
-            ok;
-        {stop, Acc1, Wal1} -> %% There is data to send
-            case notify_client(Data#data.port, Acc1#txn_iter.comitted_txns,
-                               Data#data.send_raw_values)
-            of
-                {continue, _} ->
-                    ok;%%consume_ops_from_wal(   );
-                {client_stop, LastProcessedTxn, ComittedTxns, NotComittedBorders} ->
-                    %% Poll the client, or wait for async confirmation
-                    ok;
-                {cache_stop, LastProcessedTxn, ComittedTxns, NotComittedBorders} ->
-                    %% We can not materialize the data
-                    ok
-            end;
+        {ok, TxIter1, Wal1} -> %% We reached end of WAL log
+            %% Let's wait for notifications from cache system
+            {next_state, await_cache, Data#data{await_cache = any,
+                                                txn_iter = TxIter1,
+                                                wal_info = Wal1
+                                               }};
+        {stop, TxIter1, Wal1} -> %% There is data to send
+            continue_client_stream(TxIter1, Wal1, Data);
         {error, _} = Error ->
-           {stop, Error}
+            {stop, Error}
+    end.
+
+continue_client_stream(TxIter1, Wal1, Data) ->
+    case notify_client(TxIter1#txn_iter.comitted_txns, TxIter1, Data) of
+        {continue, TxIter2} ->
+            consume_ops_from_wal(TxIter2, Wal1, Data);
+        {client_stop, _Tx, TxnIter2} ->
+                    %% Poll the client, or wait for async confirmation
+            {next_state, await_client, set_port_send_timer(Data#data{wal_info = Wal1,
+                                                                     txn_iter = TxnIter2
+                                                                    })};
+        {not_ready, Tx, TxnIter2} ->
+            %% Means that the cache is not ready yet
+            Op = Tx#wal_trans.global_opid,
+            DcId = Tx#wal_trans.dcid,
+            %% We can not materialize the data
+            {next_state, await_cache, Data#data{await_cache = {DcId, Op},
+                                                wal_info = Wal1,
+                                                txn_iter = TxnIter2
+                                               }};
+        {error, _} = Error ->
+            {stop, Error}
     end.
 
 process_ops(NewOps, LogOffset, #txn_iter{} = Acc) ->
@@ -265,59 +281,44 @@ process_ops(NewOps, LogOffset, #txn_iter{} = Acc) ->
                                }}
     end.
 
-filter_fun(#wal_trans{materialized = none}, #txn_iter{}) ->
-    true;
-filter_fun(#wal_trans{end_offset = EndOffset},
-           #txn_iter{last_commit_offset = RightOffsetBorder})
-  when EndOffset =< RightOffsetBorder ->
-    true;
-filter_fun(#wal_trans{}, _) ->
-    false.
+notify_client(ComittedTxns, TxnIter, Data) ->
+   notify_client0(ComittedTxns, TxnIter, Data).
 
-
-notify_client(Port, Comitted, RawValues) ->
-    %% try notify_client0(Port, Comitted, RawValues) of
-    %%     {ok} ->
-    %%         ok
-    %% catch _:_ ->
-    %%         ok
-    %% end.
-    ok.
-
-notify_client0([#wal_trans{materialized = none} | FinalyzedTxns],
-               LastSentTx, Port, LB, RB, RawValuesB) ->
-    notify_client0(FinalyzedTxns, LastSentTx, Port, LB, RB, RawValuesB);
+notify_client0([#wal_trans{materialized = none} | FinalyzedTxns], TxnIter, Data) ->
+    notify_client0(FinalyzedTxns, TxnIter, Data);
 notify_client0([#wal_trans{txid = TxId, end_offset = EOffset} | FinalyzedTxns],
-               LastSentTx, Port, LB, RB, RawValuesB)
+               #txn_iter{last_commit_offset = RB, not_comitted_offsets = LB} = TxnIter, Data)
   when EOffset =< RB ->
     logger:info("skip transaction with commit offset: ~p~n", [EOffset]),
-    notify_client0(FinalyzedTxns, LastSentTx, Port,
-                   remove_left_border(TxId, LB), RB, RawValuesB);
-notify_client0([#wal_trans{} = Tx | FinalizedTxns] = Txns, LastTxn,
-               Port, LB, RightOffset, RawValuesB) ->
+    LB1 = remove_left_border(TxId, LB),
+    notify_client0(FinalyzedTxns, TxnIter#txn_iter{not_comitted_offsets = LB1}, Data);
+notify_client0([#wal_trans{} = Tx | FinalizedTxns] = Txns,
+               #txn_iter{not_comitted_offsets = LB} = TxIter,
+               #data{send_raw_values = RawValues, port = Port} = Data) ->
     %% FIXME: We have a general assumption here, that transactions in the WAL
     %% log are sorted according to snapshot order, which is not the case in
     %% current wal implementation. This should not cause issues in single
     %% partition case though.
-    case is_materialization_ready(0, Tx) of
+    case is_materialization_ready(Data#data.partition, Tx) of
         true ->
-            case notify_client1(Tx, Port, LB, RawValuesB) of
+            case notify_client1(Tx, Port, LB, RawValues) of
                 ok ->
-                    notify_client0(FinalizedTxns, Tx#wal_trans.txid,
-                                   Port, remove_left_border(Tx#wal_trans.txid, LB),
-                                   RightOffset, RawValuesB);
+                    LB1 = remove_left_border(Tx#wal_trans.txid, LB),
+                    notify_client0(FinalizedTxns, TxIter#txn_iter{not_comitted_offsets = LB1}, Data);
                 {error, _} = Error ->
                     Error;
                 false ->
-                    {stop, Txns, LastTxn, LB}
+                    {client_stop, Tx, TxIter#txn_iter{comitted_txns = Txns}}
             end;
         false ->
-            {stop, Txns, LastTxn, LB}
+            {not_ready, Tx, TxIter#txn_iter{comitted_txns = Txns}}
     end;
-notify_client0([], LastTxn, _, LB, RB, _) ->
-    {ok, LastTxn, LB, RB}.
+notify_client0([], TxIter, _Data) ->
+    {continue, TxIter#txn_iter{comitted_txns = []}}.
 
-notify_client1(#wal_trans{txid = TxId, dcid = DcId, snapshot = TxST,
+notify_client1(#wal_trans{txid = TxId,
+                          dcid = DcId,
+                          snapshot = TxST,
                           materialized = TxOpsList,
                           start_offset = SOffset,
                           end_offset = EOffset
@@ -345,19 +346,13 @@ notify_client1(#wal_trans{txid = TxId, dcid = DcId, snapshot = TxST,
             {error, Reason}
     end.
 
-is_materialization_ready(Partition, Txn = #wal_trans{snapshot = TxST,
-                                                     dcid = DcId,
-                                                     global_opid = OpId
-                                                    }) ->
+is_materialization_ready(Partition, #wal_trans{snapshot = TxST, dcid = DcId, global_opid = OpId}) ->
     SN = get_stable_snapshot(),
     case compare_snapshot(SN, TxST) of
         true -> true;
         false ->
             GId = lookup_last_cache_global_opid(Partition, DcId),
-            case OpId =< GId of
-                true -> true;
-                false -> {false, TxST, DcId, OpId}
-            end
+            OpId =< GId
     end.
 
 compare_snapshot(SN, TxST) ->
@@ -405,7 +400,8 @@ materialize(Key, Type, ST, TxId) ->
           Key, Type, ST, TxId, _PropertyList = [], Partition),
     Snapshot.
 
-
+lookup_last_cache_global_opid(Partition, DcId) ->
+    logging_notification_server:lookup_last_global_id(Partition, DcId).
 
 
 
@@ -541,5 +537,8 @@ maybe_cancel_timer(Ref) ->
 
 maybe_close_file(undefined) ->
     ok;
-maybe_close_file(Fd) ->
+maybe_close_file(#wal{file_desc = Fd}) ->
     catch file:close(Fd).
+
+set_port_send_timer(Data) ->
+    Data#data{port_retry_tref = backoff:fire(Data#data.port_retry_backoff)}.

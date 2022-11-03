@@ -148,13 +148,13 @@ read_chunk(Fd, FileName, FPos, FBuff, Amount) ->
             {ok, {FPos1, Buffer1}, Terms};
         {#continuation{}, [], _BadBytes} = R ->
             logger:error("fpos: ~p~nbad bytes: ~p~n~p~n", [FPos, _BadBytes, R]),
-            {eof, {FPos, FBuff}, []};
+            {eof, {FPos, FBuff}};
 %            {error, badbytes};
         {error, _} = Error ->
             Error;
         eof ->
             %% That's ok, just need to keep previous position
-            {eof, {FPos, FBuff}, []}
+            {eof, {FPos, FBuff}}
     end.
 
 generate_pos_in_log(FPos, FBuf) ->
