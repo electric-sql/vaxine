@@ -12,7 +12,7 @@
    ]},
   {env,[]},
   {modules, []},
-  {included_applications, [fs]},
+
   {licenses, ["Apache-2.0"]},
   {links, []}
  ]}.

@@ -2,9 +2,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0,
-         register/0,
-         subscribe/0,
-         unsubscribe/0
+         register/0
         ]).
 
 -export([init/1,
@@ -15,12 +13,9 @@
          code_change/3
         ]).
 
--record(state, { ets :: ets:tid(),
-                 workers :: [{ reference(), pid() }]
+-record(state, {
+                workers :: [{ reference(), pid() }]
                }).
-
--include("vx_wal_stream.hrl").
--define(EVENT_MNG, vx_wal_stream_inotify).
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -29,35 +24,8 @@ start_link() ->
 register() ->
     gen_server:call(?MODULE, {register}).
 
-%% @doc Subscribe to events related to WAL directory
--spec subscribe() -> ok.
-subscribe() ->
-    fs:subscribe(?EVENT_MNG).
-
-%% @doc Unsubscribe from events related to WAL directory
--spec unsubscribe() -> ok.
-unsubscribe() ->
-    gen_event:delete_handler(?EVENT_MNG,
-                             {fs_event_bridge, self()}, [self()]).
-
 init(_) ->
-   T = ets:new(wal_replication_status,
-               [set, public, named_table,
-                {read_concurrency, true},
-                {write_concurrency, true},
-                {keypos, #wal_replication_status.key}
-               ]),
-
-    %% NOTE: fs does not support subscription to concrete file events through
-    %% inotifywait, but it's not limitation of the tool, but rather current
-    %% backend module. Also path should point to a directory rather than a regular
-    %% file
-    {ok, Path} = application:get_env(antidote, data_dir),
-    {ok, _} = fs:start_link(?EVENT_MNG, Path),
-
-    {ok, #state{ ets = T,
-                 workers = []
-               } }.
+   {ok, #state{workers = []} }.
 
 handle_call({register}, {Pid, _}, State) ->
     case lists:keyfind(Pid, 2, State#state.workers) of

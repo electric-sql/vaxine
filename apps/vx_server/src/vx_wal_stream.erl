@@ -21,7 +21,6 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("antidote/include/antidote.hrl").
 -include_lib("antidote/include/meta_data_notif_server.hrl").
--include("vx_wal_stream.hrl").
 -include("vx_wal.hrl").
 
 %% In milliseconds
@@ -48,9 +47,9 @@
 -record(txn_iter, { last_commit_offset :: vx_wal_utils:file_offset(),
                     last_tx_id :: antidote:txid() | undefined,
                     not_comitted_offsets = [] ::
-                      orddict:orddict(non_neg_integer(), txid()),
+                      orddict:orddict(vx_wal_utils:file_offset(), txid()),
                     not_comitted_txns = #{} :: txns_noncomitted_map(),
-                    comitted_txns = []
+                    comitted_txns = [] :: txns_comitted()
                   }).
 -type txn_iter() :: #txn_iter{}.
 
@@ -77,15 +76,11 @@
                                         [any_log_payload()]
                                       }
                                  }.
--type txns_comitted() :: [ { antidote:txid(),
-                             antidote:dcid(),
-                             antidote:clock_time(),
-                             vx_wal_utils:file_offset(),
-                             term() }
-                         ].
+-type txns_comitted() :: [ #wal_trans{} ].
+
 -type wal_offset() :: {vx_wal_utils:file_offset(), vx_wal_utils:file_offset()}.
 
-%%----------------
+-export_type([wal_offset/0]).
 
 -spec start_link(list()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(Args) ->
@@ -110,7 +105,7 @@ stop_replication(Pid) ->
 %% Current logic would only notify the process with cast message if the status
 %% is set to ready.
 -spec notify_cache_update(pid(), antidote:partition_id(), antidote:dcid(),
-                          antidote:op_num()) ->
+                          antidote:op_number()) ->
           ok.
 notify_cache_update(Pid, Partition, DcId, #op_number{global = OpId}) ->
     logger:debug("cache update notification ~p~n",
@@ -404,14 +399,9 @@ lookup_last_cache_global_opid(Partition, DcId) ->
     logging_notification_server:lookup_last_global_id(Partition, DcId).
 
 
-
-
-
-
-
-
-
-
+%%-----------------------------------------------------------------------------
+%% Transactions processing
+%%-----------------------------------------------------------------------------
 
 
 %% -spec process_txns([{term(), #log_record{}}], txns_noncomitted_map(), txns_comitted(),
