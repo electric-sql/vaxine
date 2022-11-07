@@ -1,5 +1,6 @@
 -module(vx_wal_utils).
 -export([ open_wal/2,
+          close_wal/1,
           get_lsn/1,
           get_partition_wal_path/1,
           read_ops_from_log/3
@@ -57,6 +58,11 @@ open_wal(LogFile, {LWalOffset0, _RWalOffset0} = _Lsn) ->
                     file_status = more_data,
                     file_name = LogFile
                     }}.
+
+-spec close_wal(#wal{}) -> ok.
+close_wal(#wal{file_desc = Fd}) ->
+    catch file:close(Fd),
+    ok.
 
 -spec open_log(file:filename_all(), integer() | eof) ->
           {ok, file:fd(), pos_integer() }.

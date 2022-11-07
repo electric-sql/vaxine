@@ -20,7 +20,6 @@
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("antidote/include/antidote.hrl").
--include_lib("antidote/include/meta_data_notif_server.hrl").
 -include("vx_wal.hrl").
 
 %% In milliseconds
@@ -159,11 +158,16 @@ init_stream({call, {Sender, _} = F}, {start_replication, ReqRef, Port, Opts}, Da
       {reply, F, {ok, ReplicationRef}}
      ]};
 
+init_stream({call, Sender}, {stop_replication}, Data) ->
+    {keep_state, Data, [{reply, Sender, {error, no_active_replication} }]};
+
 init_stream(Type, Msg, Data) ->
     common_callback(Type, Msg, Data).
 
 stream_catchup(internal, continue_stream, Data) ->
-    consume_ops_from_wal(Data).
+    consume_ops_from_wal(Data);
+stream_catchup(Type, Msg, Data) ->
+    common_callback(Type, Msg, Data).
 
 await_cache(info, {cache, _DcId, _OpId}, #data{await_cache = any} = Data) ->
     consume_ops_from_wal(Data);
@@ -191,6 +195,26 @@ await_client(info, {timeout, TRef, port_send_retry}, Data = #data{port_retry_tre
 await_client(Type, Msg, Data) ->
     common_callback(Type, Msg, Data).
 
+common_callback({call, Sender}, {stop_replication}, Data) ->
+    logger:info("request to stop replication~n", []),
+
+    _ = maybe_close_file(Data#data.wal_info),
+    _ = maybe_cancel_timer(Data#data.port_retry_tref),
+
+    ok = logging_notification_server:delete_handler([]),
+
+    {next_state, init_stream,
+     Data#data{await_cache = undefined,
+               port_retry_tref = undefined,
+               txn_iter = undefined,
+               wal_info = undefined
+              },
+     [{reply, Sender, ok}]
+    };
+
+common_callback({call, _Sender}, {start_replication, _, _, _}, Data) ->
+    {stop, {shutdown, wrong_state}, Data};
+
 common_callback(info, {'DOWN', _Mref, process, Pid, _}, #data{client_pid = Pid} = Data) ->
     {stop, normal, Data};
 
@@ -202,7 +226,15 @@ common_callback(info, {inet_reply, _Sock, ok}, _Data) ->
 
 common_callback(info, {inet_reply, _Sock, {error, Reason}}, Data) ->
     logger:error("socket error: ~p~n", [Reason]),
-    {stop, {shutdown, Reason}, Data}.
+    {stop, {shutdown, Reason}, Data};
+
+common_callback(info, {timeout, _TRef, port_send_retry}, _) ->
+    keep_state_and_data;
+
+common_callback(info, {cache, _DcId, _OpId}, _Data) ->
+    %% Not interested in cache updates any more
+    keep_state_and_data.
+
 
 terminate(_Reason, _SN, #data{} = Data) ->
     _ = maybe_cancel_timer(Data#data.port_retry_tref),
@@ -487,12 +519,12 @@ process_op1(#log_operation{op_type = commit, tx_id = TxId, log_payload = Payload
              | FinalizedTxns]
             };
         error ->
-            logger:warning("Empty transaction: ~p~n", [TxId]),
+            logger:warning("empty transaction: ~p~n", [TxId]),
             {RemainingOps, FinalizedTxns}
     end.
 
 prepare_txn_comitted(TxId, TxST, DcId, TxStartOffset, TxCommitOffset, TxOpsList0, OpId) ->
-    logger:info("processed txn:~n ~p ~p:~p~n",
+    logger:info("srv wal stream txn:~n ~p ~p:~p~n",
                 [TxId, TxStartOffset, TxCommitOffset]),
 
     #wal_trans{ txid = TxId,
@@ -527,8 +559,8 @@ maybe_cancel_timer(Ref) ->
 
 maybe_close_file(undefined) ->
     ok;
-maybe_close_file(#wal{file_desc = Fd}) ->
-    catch file:close(Fd).
+maybe_close_file(#wal{} = Wal) ->
+    vx_wal_utils:close_wal(Wal).
 
 set_port_send_timer(Data) ->
     Data#data{port_retry_tref = backoff:fire(Data#data.port_retry_backoff)}.
