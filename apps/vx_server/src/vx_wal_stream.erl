@@ -1,4 +1,4 @@
--module(vx_wal_stream_2).
+-module(vx_wal_stream).
 -behaviour(gen_statem).
 
 -export([ start_link/1,
@@ -113,7 +113,7 @@ stop_replication(Pid) ->
                           antidote:op_num()) ->
           ok.
 notify_cache_update(Pid, Partition, DcId, #op_number{global = OpId}) ->
-    logger:debug("cache update notification ~p~n~p~n",
+    logger:debug("cache update notification ~p~n",
                     [[Partition, DcId, OpId]]),
     Pid ! {cache, DcId, OpId},
     ok.

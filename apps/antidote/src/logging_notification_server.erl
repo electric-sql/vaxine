@@ -58,7 +58,7 @@ handle_call(Msg, State) ->
     State1 = apply_handler(Msg, State),
     {ok, _Reply = ok, State1}.
 
-handle_event({commit, Msg}, State) ->
+handle_event({cache_update, Msg}, State) ->
     try
         State1 = apply_handler(Msg, State),
         {ok, State1}
