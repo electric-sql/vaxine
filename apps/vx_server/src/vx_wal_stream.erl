@@ -185,7 +185,8 @@ await_cache(info, {cache, _DcId, _OpId}, _Data) ->
 await_cache(Type, Msg, Data) ->
     common_callback(Type, Msg, Data).
 
-await_client(info, {cache, _, _}, _Data) ->
+await_client(info, {cache, _, _} = Msg, Data) ->
+    logger:debug("ignore cache notification ~p ~p~n", [Msg, Data#data.await_cache]),
     keep_state_and_data;
 await_client(info, {timeout, TRef, port_send_retry}, Data = #data{port_retry_tref = TRef}) ->
     logger:debug("tcp port retry: ~p~n", [Data#data.port_retry_backoff]),
@@ -235,8 +236,9 @@ common_callback(info, {'EXIT', Sock, Reason}, Data = #data{port = Sock}) ->
 common_callback(info, {timeout, _TRef, port_send_retry}, _) ->
     keep_state_and_data;
 
-common_callback(info, {cache, _DcId, _OpId}, _Data) ->
+common_callback(info, {cache, _DcId, _OpId} = Msg, _Data) ->
     %% Not interested in cache updates any more
+    logger:debug("ignore cache notification ~p~n", [Msg]),
     keep_state_and_data.
 
 
