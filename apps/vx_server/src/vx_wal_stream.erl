@@ -228,6 +228,10 @@ common_callback(info, {inet_reply, _Sock, {error, Reason}}, Data) ->
     logger:error("socket error: ~p~n", [Reason]),
     {stop, {shutdown, Reason}, Data};
 
+common_callback(info, {'EXIT', Sock, Reason}, Data = #data{port = Sock}) ->
+    logger:error("socket closed: ~p~n", [Reason]),
+    {stop, {shutdown, Reason}, Data};
+
 common_callback(info, {timeout, _TRef, port_send_retry}, _) ->
     keep_state_and_data;
 
@@ -259,6 +263,9 @@ consume_ops_from_wal(TxnIter, WalInfo, Data) ->
                                                }};
         {stop, TxIter1, Wal1} -> %% There is data to send
             continue_client_stream(TxIter1, Wal1, Data);
+        {error, port_closed} ->
+            logger:info("port closed~n"),
+            {stop, {shutdown, port_closed}};
         {error, _} = Error ->
             {stop, Error}
     end.
@@ -281,6 +288,9 @@ continue_client_stream(TxIter1, Wal1, Data) ->
                                                 wal_info = Wal1,
                                                 txn_iter = TxnIter2
                                                }};
+        {error, port_closed} ->
+            logger:info("port closed~n"),
+            {stop, {shutdown, port_closed}};
         {error, _} = Error ->
             {stop, Error}
     end.
