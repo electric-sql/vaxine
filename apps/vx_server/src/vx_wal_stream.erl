@@ -290,9 +290,9 @@ continue_client_stream(TxIter1, Wal1, Data) ->
                                                }};
         {error, port_closed} ->
             logger:info("port closed~n"),
-            {stop, {shutdown, port_closed}};
-        {error, _} = Error ->
-            {stop, Error}
+            {stop, {shutdown, port_closed}}
+        %{error, _} = Error ->
+        %    {stop, Error}
     end.
 
 process_ops(NewOps, LogOffset, #txn_iter{} = Acc) ->
@@ -318,6 +318,9 @@ process_ops(NewOps, LogOffset, #txn_iter{} = Acc) ->
                                }}
     end.
 
+-spec notify_client(txns_comitted(), #txn_iter{}, #data{}) ->
+          {error, {shutdown, term()} | term()} | {not_ready, #wal_trans{}, #txn_iter{}} |
+          {client_stop, #wal_trans{}, #txn_iter{}} | {continue, #txn_iter{}}.
 notify_client(ComittedTxns, TxnIter, Data) ->
    notify_client0(ComittedTxns, TxnIter, Data).
 
