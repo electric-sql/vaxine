@@ -42,7 +42,13 @@ send_start(Port, ReqRef, ReplicationRef) ->
     ok.
 
 send_port(Port, Binary, Opts) ->
-    try erlang:port_command(Port, term_to_binary(Binary), Opts)
+    try
+        Res = erlang:port_command(Port, term_to_binary(Binary), Opts),
+        receive
+            {inet_reply, Port, _} -> Res
+        after 0 ->
+                Res
+        end
     catch _:_ ->
             {error, port_closed}
     end.
