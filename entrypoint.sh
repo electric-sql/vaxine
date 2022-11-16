@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 USER=$(id -un ${UID})
 
@@ -7,7 +7,7 @@ mkdir -p ${ROOT_DIR_PREFIX}
 chown -R ${USER} /app
 chown -R ${USER} ${ROOT_DIR_PREFIX}
 
-su ${USER} -c \
+su ${USER} -s /bin/bash -c \
 "/app/bin/vaxine foreground \
     -riak_core handoff_port ${HANDOFF_PORT} \
     -riak_core ring_creation_size ${RING_SIZE} \
