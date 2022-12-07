@@ -18,6 +18,10 @@ More information:
 
 Antidote is the reference platform of the [SyncFree](https://syncfree.lip6.fr/) and the [LightKone](https://www.lightkone.eu/) european projects.
 
-## Community
+## Contributing
 
-If you have any questions, please raise them on the [ElectricSQL community](https://electric-sql.com/about/community) channels.
+See the [Community Guidelines](https://github.com/electric-sql/meta) including the [Guide to Contributing](https://github.com/electric-sql/meta/blob/main/CONTRIBUTING.md) and [Contributor License Agreement](https://github.com/electric-sql/meta/blob/main/CLA.md).
+
+## Support
+
+We have an [open community Discord](https://discord.gg/B7kHGwDcbj). If you’re interested in the project, please come and say hello and let us know if you have any questions or need any help or support getting things running.
