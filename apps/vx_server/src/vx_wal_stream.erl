@@ -378,8 +378,12 @@ is_materialization_ready(Partition, #wal_trans{snapshot = TxST, dcid = DcId, glo
     case compare_snapshot(SN, TxST) of
         true -> true;
         false ->
-            GId = lookup_last_cache_global_opid(Partition, DcId),
-            OpId =< GId
+            case lookup_last_cache_global_opid(Partition, DcId) of
+                undefined ->
+                    false;
+                #op_number{global = GId} ->
+                    OpId =< GId
+            end
     end.
 
 compare_snapshot(SN, TxST) ->

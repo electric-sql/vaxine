@@ -245,8 +245,20 @@ handle_command({update, Key, DownstreamOp}, _Sender, State) ->
     true = op_insert_gc(Key, DownstreamOp, State),
     {reply, ok, State};
 handle_command({bump_last_opid, DcId, OpId}, _Sender, State) ->
-    update_last_applied_table(State#state.last_applied, DcId, OpId),
-    logging_notification_server:notify_cache_update(State#state.partition, DcId, OpId),
+    OpIdR = case lookup_last_applied_opid(State#state.partition, DcId) of
+                undefined ->
+                    update_last_applied_table(State#state.last_applied, DcId, OpId),
+                    OpId;
+                OpId2 ->
+                    case OpId#op_number.global > OpId2#op_number.global of
+                        true ->
+                            update_last_applied_table(State#state.last_applied, DcId, OpId),
+                            OpId;
+                        false ->
+                            OpId2
+                    end
+            end,
+    logging_notification_server:notify_cache_update(State#state.partition, DcId, OpIdR),
     {reply, ok, State};
 handle_command({store_ss, Key, Snapshot, CommitTime}, _Sender, State) ->
     internal_store_ss(Key, Snapshot, CommitTime, false, State),
