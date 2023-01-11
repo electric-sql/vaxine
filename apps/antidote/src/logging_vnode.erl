@@ -545,10 +545,12 @@ handle_command(
     } = State
 ) ->
     MyDCID = dc_utilities:get_my_dc_id(),
-    {ErrorList, SuccList, UpdatedLogs} =
+    {ErrorList, SuccList, _UpdatedLogs} =
         lists:foldl(
             fun(LogRecordOrg, {AccErr, AccSucc, UpdatedLogs}) ->
                 LogRecord = log_utilities:check_log_record_version(LogRecordOrg),
+                LogOperation = LogRecord#log_record.log_operation,
+
                 case get_log_from_map(Map, Partition, LogId) of
                     {ok, Log} ->
                         %% Generate the new operation ID
@@ -557,43 +559,47 @@ handle_command(
                         %% have already been assigned an op id number since
                         %% they are coming from an external DC
                         OpId = get_op_id(OpIdTable, {LogId, MyDCID}),
-                        #op_number{local = _Local, global = Global} = OpId,
+                        #op_number{global = Global} = OpId,
                         NewOpId = OpId#op_number{global = Global + 1},
-                        %% Should assign the opid as follows if this function starts being
-                        %% used for operations generated locally
-                        %% NewOpId =
-                        %%     case IsLocal of
-                        %%         true ->
-                        %%         OpId#op_number{local =  Local + 1, global = Global + 1};
-                        %%         false ->
-                        %%         OpId#op_number{global = Global + 1}
-                        %%     end,
                         true = update_ets_op_id({LogId, MyDCID}, NewOpId, OpIdTable),
-                        LogOperation = LogRecord#log_record.log_operation,
-                        case LogOperation#log_operation.op_type of
-                            OpType when (OpType == update) orelse (OpType == update_start) ->
-                                Bucket =
-                                    (LogOperation#log_operation.log_payload)#update_log_payload.bucket,
-                                BOpId = get_op_id(OpIdTable, {LogId, Bucket, MyDCID}),
-                                #op_number{local = _BLocal, global = BGlobal} = BOpId,
-                                NewBOpId = BOpId#op_number{global = BGlobal + 1},
-                                true = update_ets_op_id(
-                                    {LogId, Bucket, MyDCID}, NewBOpId, OpIdTable
-                                );
-                            OpType when OpType == commit ->
-                                true;
-                            _ ->
-                                true
+
+                        NewBucketOpId =
+                            case LogOperation#log_operation.op_type of
+                                OpType when (OpType == update) orelse (OpType == update_start) ->
+                                    Bucket =
+                                        (LogOperation#log_operation.log_payload)#update_log_payload.bucket,
+                                    BOpId = get_op_id(OpIdTable, {LogId, Bucket, MyDCID}),
+                                    #op_number{global = BGlobal} = BOpId,
+                                    NewBOpId = BOpId#op_number{global = BGlobal + 1},
+                                    true = update_ets_op_id(
+                                             {LogId, Bucket, MyDCID}, NewBOpId, OpIdTable
+                                            ),
+                                    NewOpId;
+                                OpType when OpType == commit ->
+                                    NewOpId;
+                                _ ->
+                                    NewOpId
                         end,
-                        ExternalOpNum = LogRecord#log_record.op_number,
-                        case insert_log_record(Log, LogId, LogRecord, EnableLog, Sync) of
+
+                        %% Previously we would not update the record, which caused wierd sequences for global
+                        %% Change opids before writing so that local equal remote local, and global is based
+                        %% on last global opid for local DC.
+                        OldOpId = LogRecord#log_record.op_number,
+                        OldBOpId= LogRecord#log_record.bucket_op_number,
+                        LogRecord2 = LogRecord#log_record{
+                                       op_number = OldOpId#op_number{global = NewOpId#op_number.global},
+                                       bucket_op_number = OldBOpId#op_number{global = NewBucketOpId#op_number.global}
+                                      },
+
+                        ExternalOpNum = LogRecord2#log_record.op_number,
+                        case insert_log_record(Log, LogId, LogRecord2, EnableLog, Sync) of
                             {ok, ExternalOpNum} ->
                                 %% Would need to uncomment this is local ops are sent to this function
                                 %% case IsLocal of
                                 %%     true -> inter_dc_log_sender_vnode:send(Partition, Operation);
                                 %%     false -> ok
                                 %% end,
-                                {AccErr, AccSucc ++ [NewOpId],
+                                {AccErr, [NewOpId | AccSucc],
                                     ordsets:add_element(Log, UpdatedLogs)};
                             {error, Reason} ->
                                 {AccErr ++ [{reply, {error, Reason}, State}], AccSucc, UpdatedLogs}
@@ -604,20 +610,7 @@ handle_command(
             end,
             {[], [], ordsets:new()},
             LogRecordList
-        ),
-    %% Sync the updated logs if necessary
-    case Sync of
-        true ->
-            ordsets:fold(
-                fun(Log, _Acc) ->
-                    ok = disk_log:sync(Log)
-                end,
-                ok,
-                UpdatedLogs
-            );
-        false ->
-            ok
-    end,
+         ),
     case ErrorList of
         [] ->
             [SuccId | _T] = SuccList,
