@@ -17,4 +17,4 @@ steps:
       DOCKER_REPO: electricsql
     command:
       - export ELECTRIC_IMAGE_NAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
-      - make make buildkite-build-and-push
+      - make buildkite-build-and-push
