@@ -1,5 +1,6 @@
 env:
-  DOCKER_REPO: europe-docker.pkg.dev/vaxine/vaxine-io
+  DOCKER_REPO: europe-docker.pkg.dev/vaxine/electric-sql
+  DOCKERHUB_REPO: electricsql
   IMAGE_NAME: vaxine
 
 agent:
@@ -9,4 +10,11 @@ agent:
 steps:
   - label: ":whale: Build & push the vaxine container"
     command: make buildkite-build-and-push
-
+  - wait
+  - label: ":rocket: Publish the image to DockerHub"
+    if: build.tag =~ /^[0-9]+\.[0-9]+\.[0-9]+/
+    env:
+      DOCKER_REPO: electricsql
+    command:
+      - export ELECTRIC_IMAGE_NAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
+      - make make buildkite-build-and-push
