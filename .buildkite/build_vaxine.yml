@@ -9,12 +9,13 @@ agent:
 
 steps:
   - label: ":whale: Build & push the vaxine container"
-    command: make buildkite-build-and-push
+    command: git fetch --tags && make buildkite-build-and-push
   - wait
   - label: ":rocket: Publish the image to DockerHub"
     if: build.tag =~ /^[0-9]+\.[0-9]+\.[0-9]+/
     env:
       DOCKER_REPO: electricsql
     command:
+      - git fetch --tags
       - export ELECTRIC_IMAGE_NAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
       - make buildkite-build-and-push
