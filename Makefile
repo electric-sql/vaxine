@@ -140,7 +140,7 @@ ifdef BUILDKITE_COMMIT
 IMAGE_TAG ?= $(shell git describe --abbrev=7 --tags --always --first-parent)
 buildkite-build-and-push:
 	ARG=""; \
-	if [ "${BUILDKITE_BRANCH}" = "main" ]; then \
+	if [ "${BUILDKITE_BRANCH}" = "main" ] || [ "${TAG_AS_LATEST}" = "true" ]; then \
 		ARG="-t ${DOCKER_REPO}/${IMAGE_NAME}:latest"; \
 	fi; \
 	docker buildx build --platform linux/arm64/v8,linux/amd64 --push -f Dockerfile.vaxine $$ARG -t ${DOCKER_REPO}/${IMAGE_NAME}:${IMAGE_TAG} .
